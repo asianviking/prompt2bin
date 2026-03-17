@@ -5,7 +5,7 @@
 
 ▸ Phase 1: Translating intent → formal spec...
   (translated by Claude via CLI)
-Arena Allocator Spec: frame_alloc
+Arena Allocator Spec: frame_scratch
   Strategy: bump
   Growth: fixed
   Threading: single_threaded
@@ -14,7 +14,7 @@ Arena Allocator Spec: frame_alloc
   Total capacity: 65536 bytes
   Usable capacity: 65520 bytes
   Max single alloc: 65520 bytes
-  Alignment: 16-64 bytes
+  Alignment: 8-64 bytes
   Safety: no_overflow, aligned_allocs, bounded_memory, no_use_after_reset
 
 ▸ Phase 2: Verifying spec with Z3...
@@ -22,20 +22,20 @@ Arena Allocator Spec: frame_alloc
   [PASS] alignment_range: Alignment range is valid
   [PASS] capacity_sanity: Usable capacity: 65520 bytes
   [PASS] no_overflow: Bump pointer arithmetic cannot overflow when space is available
-  [PASS] aligned_allocs: All allocations guaranteed 16-byte aligned
+  [PASS] aligned_allocs: All allocations guaranteed 8-byte aligned
   [PASS] bounded_memory: Fixed growth: total memory bounded at 65536 bytes
   [PASS] alloc_sequence: Verified: 0 allocations fit safely (guaranteed minimum: 0)
 
   All 7 properties verified ✓
 
 ▸ Phase 3: Generating verified C code...
-  Generated 86 lines → frame_alloc.h
+  Generated 86 lines → frame_scratch.h
 
 ▸ Phase 4: Compiling to assembly and machine code...
-  frame_alloc.s        —  2,831 bytes (human-readable assembly)
-  frame_alloc.o        —  2,608 bytes (machine code)
+  frame_scratch.s      —  2,863 bytes (human-readable assembly)
+  frame_scratch.o      —  2,616 bytes (machine code)
 
-  frame_alloc_alloc assembly (16 instructions):
+  frame_scratch_alloc assembly (16 instructions):
 
     _force_alloc:
     	endbr64
@@ -43,8 +43,8 @@ Arena Allocator Spec: frame_alloc
     	cmp	rax, 65519
     	ja	.L24
     	mov	rax, QWORD PTR 8[rdi]
-    	add	rax, 15
-    	and	rax, -16
+    	add	rax, 7
+    	and	rax, -8
     	add	rsi, rax
     	cmp	QWORD PTR 16[rdi], rsi
     	jb	.L24
@@ -57,11 +57,11 @@ Arena Allocator Spec: frame_alloc
 ════════════════════════════════════════════════════════════
   ✓ Complete pipeline: English → verified machine code
 
-    frame_alloc.h         C code (86 lines)
-    frame_alloc.s         x86-64 assembly
-    frame_alloc.o         machine code (linkable)
+    frame_scratch.h       C code (86 lines)
+    frame_scratch.s       x86-64 assembly
+    frame_scratch.o       machine code (linkable)
 
     Link into your program:
-      #include "frame_alloc.h"
+      #include "frame_scratch.h"
 ════════════════════════════════════════════════════════════
 

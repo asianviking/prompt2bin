@@ -5,7 +5,7 @@
 
 ▸ Phase 1: Translating intent → formal spec...
   (translated by Claude via CLI)
-Arena Allocator Spec: secure_key_alloc
+Arena Allocator Spec: key_material_arena
   Strategy: bump
   Growth: fixed
   Threading: single_threaded
@@ -29,13 +29,13 @@ Arena Allocator Spec: secure_key_alloc
   All 7 properties verified ✓
 
 ▸ Phase 3: Generating verified C code...
-  Generated 89 lines → secure_key_alloc.h
+  Generated 89 lines → key_material_arena.h
 
 ▸ Phase 4: Compiling to assembly and machine code...
-  secure_key_alloc.s   —  3,401 bytes (human-readable assembly)
-  secure_key_alloc.o   —  2,840 bytes (machine code)
+  key_material_arena.s —  3,441 bytes (human-readable assembly)
+  key_material_arena.o —  2,848 bytes (machine code)
 
-  secure_key_alloc_alloc assembly (24 instructions):
+  key_material_arena_alloc assembly (24 instructions):
 
     _force_alloc:
     	endbr64
@@ -65,11 +65,11 @@ Arena Allocator Spec: secure_key_alloc
 ════════════════════════════════════════════════════════════
   ✓ Complete pipeline: English → verified machine code
 
-    secure_key_alloc.h    C code (89 lines)
-    secure_key_alloc.s    x86-64 assembly
-    secure_key_alloc.o    machine code (linkable)
+    key_material_arena.h  C code (89 lines)
+    key_material_arena.s  x86-64 assembly
+    key_material_arena.o  machine code (linkable)
 
     Link into your program:
-      #include "secure_key_alloc.h"
+      #include "key_material_arena.h"
 ════════════════════════════════════════════════════════════
 
