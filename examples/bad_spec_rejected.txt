@@ -20,3 +20,5 @@ Verification results:
          Counterexample: base=1, offset=1
   [PASS] bounded_memory: Fixed growth: total memory bounded at 100 bytes
   [PASS] alloc_sequence: Verified: 0 allocations fit safely (guaranteed minimum: 0)
+
+Code generation BLOCKED — no C, no assembly, no binary.

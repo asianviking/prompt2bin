@@ -7,7 +7,10 @@ Usage:
     python prompt2bin.py --interactive
 """
 
+import shutil
+import subprocess
 import sys
+import tempfile
 import os
 from intent import intent_to_spec
 from verify import verify_spec
@@ -22,9 +25,101 @@ BANNER = """
 """
 
 
+def compile_to_binary(c_code: str, name: str) -> tuple[str | None, str | None, str | None]:
+    """
+    Compile C code down to assembly and object file.
+
+    Returns (asm_path, obj_path, error_msg).
+    Generates a thin wrapper .c that includes the header and
+    instantiates each function so GCC has something to compile.
+    """
+    gcc = shutil.which("gcc")
+    if not gcc:
+        return None, None, "gcc not found"
+
+    header_path = os.path.abspath(f"{name}.h")
+
+    # Wrapper .c that forces the compiler to emit code for all functions
+    wrapper = f"""\
+#include "{header_path}"
+
+/* Force emission of all functions so they appear in assembly */
+void *_force_create(void) {{ return {name}_create(); }}
+void *_force_alloc(void *a, unsigned long n) {{ return {name}_alloc(({name}_t*)a, n); }}
+void  _force_reset(void *a) {{ {name}_reset(({name}_t*)a); }}
+void  _force_destroy(void *a) {{ {name}_destroy(({name}_t*)a); }}
+"""
+
+    asm_path = f"{name}.s"
+    obj_path = f"{name}.o"
+
+    with tempfile.NamedTemporaryFile(suffix=".c", mode="w", delete=False) as f:
+        f.write(wrapper)
+        wrapper_path = f.name
+
+    try:
+        # Compile to assembly (human-readable)
+        result = subprocess.run(
+            [gcc, "-O2", "-S", "-masm=intel", "-fno-asynchronous-unwind-tables",
+             "-fno-exceptions", "-o", asm_path, wrapper_path],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return None, None, f"Assembly generation failed:\n{result.stderr}"
+
+        # Compile to object file (machine code)
+        result = subprocess.run(
+            [gcc, "-O2", "-c", "-o", obj_path, wrapper_path],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return asm_path, None, f"Object compilation failed:\n{result.stderr}"
+
+        return asm_path, obj_path, None
+
+    finally:
+        os.unlink(wrapper_path)
+
+
+def show_assembly_highlights(asm_path: str, name: str):
+    """Print the key assembly functions with annotation."""
+    with open(asm_path) as f:
+        asm = f.read()
+
+    # Extract the alloc function — that's the interesting one
+    lines = asm.split("\n")
+    in_func = False
+    func_lines = []
+    target = f"_force_alloc"
+
+    for line in lines:
+        if target in line and ":" in line:
+            in_func = True
+            func_lines = [line]
+            continue
+        if in_func:
+            if line.strip().startswith(".cfi_endproc") or (
+                line.strip().startswith(".") and "size" in line and target in line
+            ):
+                break
+            func_lines.append(line)
+
+    if func_lines:
+        # Filter out directives, keep only instructions
+        instructions = [
+            l for l in func_lines
+            if l.strip() and not l.strip().startswith(".")
+        ]
+        print(f"\n  {name}_alloc assembly ({len(instructions)} instructions):\n")
+        for line in instructions[:25]:  # Cap at 25 lines
+            print(f"    {line}")
+        if len(instructions) > 25:
+            print(f"    ... ({len(instructions) - 25} more)")
+
+
 def compile(intent: str, output_path: str | None = None) -> bool:
     """
-    Full pipeline: intent → spec → verify → C code.
+    Full pipeline: intent → spec → verify → C code → assembly → binary.
     Returns True if verification passed and code was generated.
     """
     print(f"\n{'─' * 60}")
@@ -69,11 +164,32 @@ def compile(intent: str, output_path: str | None = None) -> bool:
     lines = c_code.count("\n")
     print(f"  Generated {lines} lines → {output_path}")
 
+    # ── Phase 4: Compile to assembly + machine code ──
+    print("\n▸ Phase 4: Compiling to assembly and machine code...")
+    asm_path, obj_path, err = compile_to_binary(c_code, spec.name)
+
+    if err:
+        print(f"  ⚠ {err}")
+        print(f"  (C code is still valid — compile manually with gcc)")
+    else:
+        asm_size = os.path.getsize(asm_path)
+        obj_size = os.path.getsize(obj_path)
+        print(f"  {asm_path:20s} — {asm_size:>6,} bytes (human-readable assembly)")
+        print(f"  {obj_path:20s} — {obj_size:>6,} bytes (machine code)")
+        show_assembly_highlights(asm_path, spec.name)
+
     # ── Summary ──
     print(f"\n{'═' * 60}")
-    print(f"  ✓ {output_path} — verified arena allocator")
-    print(f"    Compile with: gcc -O2 -o program your_main.c")
-    print(f"    (it's a header-only library, just #include \"{output_path}\")")
+    print(f"  ✓ Complete pipeline: English → verified machine code")
+    print(f"")
+    print(f"    {output_path:20s}  C code ({lines} lines)")
+    if asm_path:
+        print(f"    {asm_path:20s}  x86-64 assembly")
+    if obj_path:
+        print(f"    {obj_path:20s}  machine code (linkable)")
+    print(f"")
+    print(f"    Link into your program:")
+    print(f"      #include \"{output_path}\"")
     print(f"{'═' * 60}\n")
 
     return True

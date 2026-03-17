@@ -5,7 +5,7 @@
 
 ▸ Phase 1: Translating intent → formal spec...
   (translated by Claude via CLI)
-Arena Allocator Spec: lockfree_arena
+Arena Allocator Spec: concurrent_arena
   Strategy: freelist
   Growth: fixed
   Threading: lock_free
@@ -29,11 +29,42 @@ Arena Allocator Spec: lockfree_arena
   All 7 properties verified ✓
 
 ▸ Phase 3: Generating verified C code...
-  Generated 84 lines → lockfree_arena.h
+  Generated 84 lines → concurrent_arena.h
+
+▸ Phase 4: Compiling to assembly and machine code...
+  concurrent_arena.s   —  2,866 bytes (human-readable assembly)
+  concurrent_arena.o   —  2,432 bytes (machine code)
+
+  concurrent_arena_alloc assembly (19 instructions):
+
+    _force_alloc:
+    	endbr64
+    	lea	rax, -1[rsi]
+    	lea	rcx, 8[rdi]
+    	cmp	rax, 255
+    	ja	.L28
+    	mov	rax, QWORD PTR [rcx]
+    	lea	rdx, 63[rax]
+    	and	rdx, -64
+    	lea	r8, [rsi+rdx]
+    	cmp	QWORD PTR 16[rdi], r8
+    	jb	.L28
+    	lock cmpxchg	QWORD PTR [rcx], r8
+    	jne	.L26
+    	mov	rax, QWORD PTR [rdi]
+    	add	rax, rdx
+    	ret
+    	xor	eax, eax
+    	ret
 
 ════════════════════════════════════════════════════════════
-  ✓ lockfree_arena.h — verified arena allocator
-    Compile with: gcc -O2 -o program your_main.c
-    (it's a header-only library, just #include "lockfree_arena.h")
+  ✓ Complete pipeline: English → verified machine code
+
+    concurrent_arena.h    C code (84 lines)
+    concurrent_arena.s    x86-64 assembly
+    concurrent_arena.o    machine code (linkable)
+
+    Link into your program:
+      #include "concurrent_arena.h"
 ════════════════════════════════════════════════════════════
 

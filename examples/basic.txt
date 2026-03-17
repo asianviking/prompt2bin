@@ -1,46 +1,46 @@
 
 ────────────────────────────────────────────────────────────
-  INPUT: I want a fast game frame allocator for temporary per-frame scratch memory, maybe 64KB, nothing fancy
+  INPUT: I need an arena allocator with 4KB pages and 16-byte alignment
 ────────────────────────────────────────────────────────────
 
 ▸ Phase 1: Translating intent → formal spec...
   (translated by Claude via CLI)
-Arena Allocator Spec: frame_alloc
+Arena Allocator Spec: arena_4k
   Strategy: bump
   Growth: fixed
   Threading: single_threaded
-  Page size: 65536 bytes
-  Max pages: 1
-  Total capacity: 65536 bytes
-  Usable capacity: 65520 bytes
-  Max single alloc: 65520 bytes
+  Page size: 4096 bytes
+  Max pages: 256
+  Total capacity: 1048576 bytes
+  Usable capacity: 1044480 bytes
+  Max single alloc: 4080 bytes
   Alignment: 16-64 bytes
-  Safety: no_overflow, aligned_allocs, bounded_memory, no_use_after_reset
+  Safety: no_overflow, aligned_allocs, bounded_memory
 
 ▸ Phase 2: Verifying spec with Z3...
   [PASS] power_of_two: All sizes are powers of two
   [PASS] alignment_range: Alignment range is valid
-  [PASS] capacity_sanity: Usable capacity: 65520 bytes
+  [PASS] capacity_sanity: Usable capacity: 1044480 bytes
   [PASS] no_overflow: Bump pointer arithmetic cannot overflow when space is available
   [PASS] aligned_allocs: All allocations guaranteed 16-byte aligned
-  [PASS] bounded_memory: Fixed growth: total memory bounded at 65536 bytes
+  [PASS] bounded_memory: Fixed growth: total memory bounded at 1048576 bytes
   [PASS] alloc_sequence: Verified: 0 allocations fit safely (guaranteed minimum: 0)
 
   All 7 properties verified ✓
 
 ▸ Phase 3: Generating verified C code...
-  Generated 86 lines → frame_alloc.h
+  Generated 84 lines → arena_4k.h
 
 ▸ Phase 4: Compiling to assembly and machine code...
-  frame_alloc.s        —  2,831 bytes (human-readable assembly)
-  frame_alloc.o        —  2,608 bytes (machine code)
+  arena_4k.s           —  2,662 bytes (human-readable assembly)
+  arena_4k.o           —  2,560 bytes (machine code)
 
-  frame_alloc_alloc assembly (16 instructions):
+  arena_4k_alloc assembly (16 instructions):
 
     _force_alloc:
     	endbr64
     	lea	rax, -1[rsi]
-    	cmp	rax, 65519
+    	cmp	rax, 4079
     	ja	.L24
     	mov	rax, QWORD PTR 8[rdi]
     	add	rax, 15
@@ -57,11 +57,11 @@ Arena Allocator Spec: frame_alloc
 ════════════════════════════════════════════════════════════
   ✓ Complete pipeline: English → verified machine code
 
-    frame_alloc.h         C code (86 lines)
-    frame_alloc.s         x86-64 assembly
-    frame_alloc.o         machine code (linkable)
+    arena_4k.h            C code (84 lines)
+    arena_4k.s            x86-64 assembly
+    arena_4k.o            machine code (linkable)
 
     Link into your program:
-      #include "frame_alloc.h"
+      #include "arena_4k.h"
 ════════════════════════════════════════════════════════════
 

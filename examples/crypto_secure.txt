@@ -5,8 +5,8 @@
 
 ▸ Phase 1: Translating intent → formal spec...
   (translated by Claude via CLI)
-Arena Allocator Spec: crypto_keys
-  Strategy: freelist
+Arena Allocator Spec: secure_key_alloc
+  Strategy: bump
   Growth: fixed
   Threading: single_threaded
   Page size: 512 bytes
@@ -29,11 +29,47 @@ Arena Allocator Spec: crypto_keys
   All 7 properties verified ✓
 
 ▸ Phase 3: Generating verified C code...
-  Generated 89 lines → crypto_keys.h
+  Generated 89 lines → secure_key_alloc.h
+
+▸ Phase 4: Compiling to assembly and machine code...
+  secure_key_alloc.s   —  3,401 bytes (human-readable assembly)
+  secure_key_alloc.o   —  2,840 bytes (machine code)
+
+  secure_key_alloc_alloc assembly (24 instructions):
+
+    _force_alloc:
+    	endbr64
+    	lea	rax, -1[rsi]
+    	cmp	rax, 495
+    	ja	.L28
+    	mov	rax, QWORD PTR 8[rdi]
+    	mov	rdx, rsi
+    	xor	ecx, ecx
+    	add	rax, 15
+    	and	rax, -16
+    	lea	rsi, [rsi+rax]
+    	cmp	QWORD PTR 16[rdi], rsi
+    	jb	.L31
+    	sub	rsp, 8
+    	mov	QWORD PTR 8[rdi], rsi
+    	add	rax, QWORD PTR [rdi]
+    	xor	esi, esi
+    	mov	rdi, rax
+    	call	memset@PLT
+    	add	rsp, 8
+    	ret
+    	xor	ecx, ecx
+    	mov	rax, rcx
+    	ret
 
 ════════════════════════════════════════════════════════════
-  ✓ crypto_keys.h — verified arena allocator
-    Compile with: gcc -O2 -o program your_main.c
-    (it's a header-only library, just #include "crypto_keys.h")
+  ✓ Complete pipeline: English → verified machine code
+
+    secure_key_alloc.h    C code (89 lines)
+    secure_key_alloc.s    x86-64 assembly
+    secure_key_alloc.o    machine code (linkable)
+
+    Link into your program:
+      #include "secure_key_alloc.h"
 ════════════════════════════════════════════════════════════
 
