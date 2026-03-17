@@ -1,0 +1,39 @@
+
+────────────────────────────────────────────────────────────
+  INPUT: I want a fast game frame allocator for temporary per-frame scratch memory, maybe 64KB, nothing fancy
+────────────────────────────────────────────────────────────
+
+▸ Phase 1: Translating intent → formal spec...
+  (translated by Claude via CLI)
+Arena Allocator Spec: game_frame
+  Strategy: bump
+  Growth: fixed
+  Threading: single_threaded
+  Page size: 65536 bytes
+  Max pages: 1
+  Total capacity: 65536 bytes
+  Usable capacity: 65520 bytes
+  Max single alloc: 65520 bytes
+  Alignment: 16-64 bytes
+  Safety: no_overflow, aligned_allocs, bounded_memory, no_use_after_reset
+
+▸ Phase 2: Verifying spec with Z3...
+  [PASS] power_of_two: All sizes are powers of two
+  [PASS] alignment_range: Alignment range is valid
+  [PASS] capacity_sanity: Usable capacity: 65520 bytes
+  [PASS] no_overflow: Bump pointer arithmetic cannot overflow when space is available
+  [PASS] aligned_allocs: All allocations guaranteed 16-byte aligned
+  [PASS] bounded_memory: Fixed growth: total memory bounded at 65536 bytes
+  [PASS] alloc_sequence: Verified: 0 allocations fit safely (guaranteed minimum: 0)
+
+  All 7 properties verified ✓
+
+▸ Phase 3: Generating verified C code...
+  Generated 86 lines → game_frame.h
+
+════════════════════════════════════════════════════════════
+  ✓ game_frame.h — verified arena allocator
+    Compile with: gcc -O2 -o program your_main.c
+    (it's a header-only library, just #include "game_frame.h")
+════════════════════════════════════════════════════════════
+

@@ -1,0 +1,22 @@
+Arena Allocator Spec (intentionally bad):
+Arena Allocator Spec: arena
+  Strategy: bump
+  Growth: fixed
+  Threading: single_threaded
+  Page size: 100 bytes
+  Max pages: 1
+  Total capacity: 100 bytes
+  Usable capacity: 84 bytes
+  Max single alloc: 84 bytes
+  Alignment: 3-64 bytes
+  Safety: no_overflow, aligned_allocs, bounded_memory
+
+Verification results:
+  [FAIL] power_of_two: Not power of two: page_size, min_align
+  [PASS] alignment_range: Alignment range is valid
+  [PASS] capacity_sanity: Usable capacity: 84 bytes
+  [PASS] no_overflow: Bump pointer arithmetic cannot overflow when space is available
+  [FAIL] aligned_allocs: Allocation can return unaligned pointer
+         Counterexample: base=1, offset=1
+  [PASS] bounded_memory: Fixed growth: total memory bounded at 100 bytes
+  [PASS] alloc_sequence: Verified: 0 allocations fit safely (guaranteed minimum: 0)

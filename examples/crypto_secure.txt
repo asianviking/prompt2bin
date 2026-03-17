@@ -1,0 +1,39 @@
+
+────────────────────────────────────────────────────────────
+  INPUT: I need something to handle crypto key material in memory — it absolutely must be wiped when we're done, no traces left, small buffer is fine, like 512 bytes
+────────────────────────────────────────────────────────────
+
+▸ Phase 1: Translating intent → formal spec...
+  (translated by Claude via CLI)
+Arena Allocator Spec: crypto_keys
+  Strategy: freelist
+  Growth: fixed
+  Threading: single_threaded
+  Page size: 512 bytes
+  Max pages: 1
+  Total capacity: 512 bytes
+  Usable capacity: 496 bytes
+  Max single alloc: 496 bytes
+  Alignment: 16-64 bytes
+  Safety: no_overflow, aligned_allocs, bounded_memory, no_use_after_reset, zero_on_alloc, zero_on_reset
+
+▸ Phase 2: Verifying spec with Z3...
+  [PASS] power_of_two: All sizes are powers of two
+  [PASS] alignment_range: Alignment range is valid
+  [PASS] capacity_sanity: Usable capacity: 496 bytes
+  [PASS] no_overflow: Bump pointer arithmetic cannot overflow when space is available
+  [PASS] aligned_allocs: All allocations guaranteed 16-byte aligned
+  [PASS] bounded_memory: Fixed growth: total memory bounded at 512 bytes
+  [PASS] alloc_sequence: Verified: 0 allocations fit safely (guaranteed minimum: 0)
+
+  All 7 properties verified ✓
+
+▸ Phase 3: Generating verified C code...
+  Generated 89 lines → crypto_keys.h
+
+════════════════════════════════════════════════════════════
+  ✓ crypto_keys.h — verified arena allocator
+    Compile with: gcc -O2 -o program your_main.c
+    (it's a header-only library, just #include "crypto_keys.h")
+════════════════════════════════════════════════════════════
+

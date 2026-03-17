@@ -1,0 +1,39 @@
+
+────────────────────────────────────────────────────────────
+  INPUT: Lock-free concurrent arena, 1MB total, 4KB pages, 64-byte alignment, max allocation of 256 bytes
+────────────────────────────────────────────────────────────
+
+▸ Phase 1: Translating intent → formal spec...
+  (translated by Claude via CLI)
+Arena Allocator Spec: lockfree_arena
+  Strategy: freelist
+  Growth: fixed
+  Threading: lock_free
+  Page size: 4096 bytes
+  Max pages: 256
+  Total capacity: 1048576 bytes
+  Usable capacity: 1044480 bytes
+  Max single alloc: 256 bytes
+  Alignment: 64-64 bytes
+  Safety: no_overflow, aligned_allocs, bounded_memory
+
+▸ Phase 2: Verifying spec with Z3...
+  [PASS] power_of_two: All sizes are powers of two
+  [PASS] alignment_range: Alignment range is valid
+  [PASS] capacity_sanity: Usable capacity: 1044480 bytes
+  [PASS] no_overflow: Bump pointer arithmetic cannot overflow when space is available
+  [PASS] aligned_allocs: All allocations guaranteed 64-byte aligned
+  [PASS] bounded_memory: Fixed growth: total memory bounded at 1048576 bytes
+  [PASS] alloc_sequence: Verified: 12 allocations fit safely (guaranteed minimum: 12)
+
+  All 7 properties verified ✓
+
+▸ Phase 3: Generating verified C code...
+  Generated 84 lines → lockfree_arena.h
+
+════════════════════════════════════════════════════════════
+  ✓ lockfree_arena.h — verified arena allocator
+    Compile with: gcc -O2 -o program your_main.c
+    (it's a header-only library, just #include "lockfree_arena.h")
+════════════════════════════════════════════════════════════
+
