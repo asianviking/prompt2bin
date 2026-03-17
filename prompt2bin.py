@@ -15,6 +15,8 @@ import os
 from intent import intent_to_spec
 from verify import verify_spec
 from codegen import generate_c
+from codegen_llm import generate_c_llm
+from test_harness import run_test_harness
 
 
 BANNER = """
@@ -152,8 +154,16 @@ def compile(intent: str, output_path: str | None = None) -> bool:
     print(f"\n  All {len(results)} properties verified ✓")
 
     # ── Phase 3: Code Generation ──
-    print("\n▸ Phase 3: Generating verified C code...")
-    c_code = generate_c(spec)
+    verified_props = [r.message for r in results if r.passed]
+
+    print("\n▸ Phase 3: Generating C code via LLM...")
+    c_code = generate_c_llm(spec, verified_properties=verified_props)
+    codegen_source = "Claude"
+
+    if c_code is None:
+        print("  LLM codegen unavailable or failed — using template fallback")
+        c_code = generate_c(spec)
+        codegen_source = "template"
 
     if output_path is None:
         output_path = f"{spec.name}.h"
@@ -162,7 +172,23 @@ def compile(intent: str, output_path: str | None = None) -> bool:
         f.write(c_code)
 
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {output_path}")
+    print(f"  Generated {lines} lines → {output_path} (via {codegen_source})")
+
+    # ── Phase 3b: Runtime validation ──
+    print("\n▸ Phase 3b: Running test harness...")
+    test_ok, test_msg = run_test_harness(spec, output_path)
+    print(f"  {test_msg}")
+
+    if not test_ok and codegen_source == "Claude":
+        print("  LLM-generated code failed tests — falling back to template")
+        c_code = generate_c(spec)
+        codegen_source = "template (fallback)"
+        with open(output_path, "w") as f:
+            f.write(c_code)
+        lines = c_code.count("\n")
+        print(f"  Regenerated {lines} lines → {output_path} (via {codegen_source})")
+        test_ok, test_msg = run_test_harness(spec, output_path)
+        print(f"  {test_msg}")
 
     # ── Phase 4: Compile to assembly + machine code ──
     print("\n▸ Phase 4: Compiling to assembly and machine code...")

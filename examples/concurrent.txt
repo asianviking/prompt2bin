@@ -28,8 +28,12 @@ Arena Allocator Spec: lockfree_arena
 
   All 7 properties verified ✓
 
-▸ Phase 3: Generating verified C code...
-  Generated 84 lines → lockfree_arena.h
+▸ Phase 3: Generating C code via LLM...
+  LLM codegen unavailable or failed — using template fallback
+  Generated 84 lines → lockfree_arena.h (via template)
+
+▸ Phase 3b: Running test harness...
+  PASS: all tests passed
 
 ▸ Phase 4: Compiling to assembly and machine code...
   lockfree_arena.s     —  2,826 bytes (human-readable assembly)

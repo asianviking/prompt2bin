@@ -5,71 +5,76 @@
 
 ▸ Phase 1: Translating intent → formal spec...
   (translated by Claude via CLI)
-Arena Allocator Spec: key_material_arena
+Arena Allocator Spec: crypto_key_buf
   Strategy: bump
   Growth: fixed
   Threading: single_threaded
-  Page size: 512 bytes
+  Page size: 4096 bytes
   Max pages: 1
-  Total capacity: 512 bytes
-  Usable capacity: 496 bytes
-  Max single alloc: 496 bytes
+  Total capacity: 4096 bytes
+  Usable capacity: 4080 bytes
+  Max single alloc: 4080 bytes
   Alignment: 16-64 bytes
   Safety: no_overflow, aligned_allocs, bounded_memory, no_use_after_reset, zero_on_alloc, zero_on_reset
 
 ▸ Phase 2: Verifying spec with Z3...
   [PASS] power_of_two: All sizes are powers of two
   [PASS] alignment_range: Alignment range is valid
-  [PASS] capacity_sanity: Usable capacity: 496 bytes
+  [PASS] capacity_sanity: Usable capacity: 4080 bytes
   [PASS] no_overflow: Bump pointer arithmetic cannot overflow when space is available
   [PASS] aligned_allocs: All allocations guaranteed 16-byte aligned
-  [PASS] bounded_memory: Fixed growth: total memory bounded at 512 bytes
+  [PASS] bounded_memory: Fixed growth: total memory bounded at 4096 bytes
   [PASS] alloc_sequence: Verified: 0 allocations fit safely (guaranteed minimum: 0)
 
   All 7 properties verified ✓
 
-▸ Phase 3: Generating verified C code...
-  Generated 89 lines → key_material_arena.h
+▸ Phase 3: Generating C code via LLM...
+  Generated 164 lines → crypto_key_buf.h (via Claude)
+
+▸ Phase 3b: Running test harness...
+  PASS: all tests passed
 
 ▸ Phase 4: Compiling to assembly and machine code...
-  key_material_arena.s —  3,441 bytes (human-readable assembly)
-  key_material_arena.o —  2,848 bytes (machine code)
+  crypto_key_buf.s     —  1,944 bytes (human-readable assembly)
+  crypto_key_buf.o     —  2,016 bytes (machine code)
 
-  key_material_arena_alloc assembly (24 instructions):
+  crypto_key_buf_alloc assembly (30 instructions):
 
     _force_alloc:
     	endbr64
     	lea	rax, -1[rsi]
-    	cmp	rax, 495
-    	ja	.L28
-    	mov	rax, QWORD PTR 8[rdi]
-    	mov	rdx, rsi
-    	xor	ecx, ecx
+    	cmp	rax, 4079
+    	ja	.L11
+    	test	rdi, rdi
+    	je	.L11
+    	mov	rax, QWORD PTR [rdi]
     	add	rax, 15
     	and	rax, -16
-    	lea	rsi, [rsi+rax]
-    	cmp	QWORD PTR 16[rdi], rsi
-    	jb	.L31
-    	sub	rsp, 8
-    	mov	QWORD PTR 8[rdi], rsi
-    	add	rax, QWORD PTR [rdi]
-    	xor	esi, esi
-    	mov	rdi, rax
-    	call	memset@PLT
-    	add	rsp, 8
-    	ret
+    	cmp	rax, 4080
+    	ja	.L11
+    	mov	rdx, rsi
+    	mov	esi, 4080
     	xor	ecx, ecx
-    	mov	rax, rcx
-    	ret
+    	sub	rsi, rax
+    	cmp	rsi, rdx
+    	jb	.L14
+    	lea	rcx, 16[rdi+rax]
+    	add	rax, rdx
+    	sub	rsp, 8
+    	xor	esi, esi
+    	mov	QWORD PTR [rdi], rax
+    	mov	rdi, rcx
+    	call	memset@PLT
+    ... (5 more)
 
 ════════════════════════════════════════════════════════════
   ✓ Complete pipeline: English → verified machine code
 
-    key_material_arena.h  C code (89 lines)
-    key_material_arena.s  x86-64 assembly
-    key_material_arena.o  machine code (linkable)
+    crypto_key_buf.h      C code (164 lines)
+    crypto_key_buf.s      x86-64 assembly
+    crypto_key_buf.o      machine code (linkable)
 
     Link into your program:
-      #include "key_material_arena.h"
+      #include "crypto_key_buf.h"
 ════════════════════════════════════════════════════════════
 

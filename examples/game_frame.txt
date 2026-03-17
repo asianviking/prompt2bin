@@ -5,7 +5,7 @@
 
 ▸ Phase 1: Translating intent → formal spec...
   (translated by Claude via CLI)
-Arena Allocator Spec: frame_scratch
+Arena Allocator Spec: game_frame_scratch
   Strategy: bump
   Growth: fixed
   Threading: single_threaded
@@ -28,28 +28,32 @@ Arena Allocator Spec: frame_scratch
 
   All 7 properties verified ✓
 
-▸ Phase 3: Generating verified C code...
-  Generated 86 lines → frame_scratch.h
+▸ Phase 3: Generating C code via LLM...
+  Generated 95 lines → game_frame_scratch.h (via Claude)
+
+▸ Phase 3b: Running test harness...
+  PASS: all tests passed
 
 ▸ Phase 4: Compiling to assembly and machine code...
-  frame_scratch.s      —  2,863 bytes (human-readable assembly)
-  frame_scratch.o      —  2,616 bytes (machine code)
+  game_frame_scratch.s —  1,402 bytes (human-readable assembly)
+  game_frame_scratch.o —  1,816 bytes (machine code)
 
-  frame_scratch_alloc assembly (16 instructions):
+  game_frame_scratch_alloc assembly (17 instructions):
 
     _force_alloc:
     	endbr64
-    	lea	rax, -1[rsi]
-    	cmp	rax, 65519
-    	ja	.L24
-    	mov	rax, QWORD PTR 8[rdi]
+    	test	rdi, rdi
+    	je	.L11
+    	test	rsi, rsi
+    	je	.L11
+    	mov	rax, QWORD PTR [rdi]
     	add	rax, 7
-    	and	rax, -8
+    	and	eax, 4294967288
     	add	rsi, rax
-    	cmp	QWORD PTR 16[rdi], rsi
-    	jb	.L24
-    	mov	QWORD PTR 8[rdi], rsi
-    	add	rax, QWORD PTR [rdi]
+    	cmp	rsi, 65520
+    	ja	.L11
+    	mov	QWORD PTR [rdi], rsi
+    	lea	rax, 16[rdi+rax]
     	ret
     	xor	eax, eax
     	ret
@@ -57,11 +61,11 @@ Arena Allocator Spec: frame_scratch
 ════════════════════════════════════════════════════════════
   ✓ Complete pipeline: English → verified machine code
 
-    frame_scratch.h       C code (86 lines)
-    frame_scratch.s       x86-64 assembly
-    frame_scratch.o       machine code (linkable)
+    game_frame_scratch.h  C code (95 lines)
+    game_frame_scratch.s  x86-64 assembly
+    game_frame_scratch.o  machine code (linkable)
 
     Link into your program:
-      #include "frame_scratch.h"
+      #include "game_frame_scratch.h"
 ════════════════════════════════════════════════════════════
 
