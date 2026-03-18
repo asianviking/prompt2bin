@@ -51,7 +51,12 @@ Every stage is a quality gate. Z3 blocks code generation if any safety property 
 pip install prompt2bin
 ```
 
-Requires GCC and [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) for AI translation and codegen.
+Requires GCC and at least one LLM backend:
+
+- **Claude CLI** (default): Install [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) — no API key needed
+- **OpenAI**: `pip install prompt2bin[openai]` and set `OPENAI_API_KEY`
+
+Set `P2B_BACKEND=openai` to force OpenAI, or let it auto-detect.
 
 ## Usage
 
@@ -163,6 +168,7 @@ All source lives in `src/prompt2bin/`:
 | Module | Role |
 |--------|------|
 | `cli.py` | Pipeline orchestrator + project build system |
+| `llm.py` | LLM backend abstraction (Claude CLI / OpenAI API) |
 | `project.py` | TOML project loader (`build.toml` → component configs) |
 | `spec.py` | Formal spec formats (ArenaSpec, RingBufferSpec) |
 | `intent.py` | Arena intent translator (Claude CLI + regex fallback) |
@@ -179,4 +185,6 @@ All source lives in `src/prompt2bin/`:
 
 - Python 3.11+
 - GCC
-- [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) (for AI translation and codegen — regex fallback available for intent parsing)
+- LLM backend (at least one):
+  - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) (default, auto-detected)
+  - [OpenAI API](https://platform.openai.com/docs/quickstart) (`pip install openai`, set `OPENAI_API_KEY`)

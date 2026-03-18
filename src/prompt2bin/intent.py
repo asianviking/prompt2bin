@@ -13,8 +13,6 @@ extraction and rely on verification as the safety net.
 import json
 import os
 import re
-import shutil
-import subprocess
 from .spec import (
     ArenaSpec, AllocStrategy, GrowthPolicy, ThreadSafety,
     MemoryBounds, AlignmentSpec, SafetyInvariants, PerformanceConstraints,
@@ -86,47 +84,15 @@ SYSTEM_PROMPT = (
 )
 
 
-def intent_to_spec_claude(intent: str) -> ArenaSpec | None:
-    """Use Claude CLI to translate intent → ArenaSpec via structured JSON output."""
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        return None
-
-    try:
-        result = subprocess.run(
-            [
-                claude_bin, "-p",
-                "--output-format", "json",
-                "--system-prompt", SYSTEM_PROMPT,
-                "--json-schema", JSON_SCHEMA,
-                "--tools", "",
-                "--model", "haiku",
-                intent,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None
-
-    if result.returncode != 0:
-        return None
-
-    try:
-        response = json.loads(result.stdout)
-        # structured_output contains the schema-validated JSON
-        params = response.get("structured_output")
-        if params and isinstance(params, dict):
+def intent_to_spec_llm(intent: str) -> ArenaSpec | None:
+    """Use LLM backend to translate intent → ArenaSpec via structured JSON output."""
+    from . import llm
+    params = llm.structured(intent, SYSTEM_PROMPT, JSON_SCHEMA, timeout=60)
+    if params and isinstance(params, dict):
+        try:
             return _tool_input_to_spec(params)
-        # fallback: try parsing result as JSON
-        raw = response.get("result", "")
-        if isinstance(raw, str):
-            params = json.loads(raw)
-            return _tool_input_to_spec(params)
-    except (json.JSONDecodeError, KeyError, TypeError):
-        pass
-
+        except (KeyError, TypeError):
+            pass
     return None
 
 
@@ -296,15 +262,15 @@ def intent_to_spec(intent: str) -> ArenaSpec:
     """
     Translate natural language intent into a formal ArenaSpec.
 
-    Tries Claude CLI first (better understanding of ambiguous intent).
-    Falls back to regex parser if CLI unavailable or fails.
+    Tries LLM backend first (better understanding of ambiguous intent).
+    Falls back to regex parser if LLM unavailable or fails.
     """
-    # Try Claude CLI first
-    spec = intent_to_spec_claude(intent)
+    from . import llm
+    spec = intent_to_spec_llm(intent)
     if spec is not None:
-        print("  (translated by Claude via CLI)")
+        print(f"  (translated by {llm.get_backend()})")
         return spec
 
     # Fallback to regex
-    print("  (translated by regex fallback — install Claude CLI for AI translation)")
+    print("  (translated by regex fallback)")
     return intent_to_spec_regex(intent)

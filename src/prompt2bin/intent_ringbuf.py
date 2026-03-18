@@ -6,8 +6,6 @@ Same pattern as arena: Claude CLI primary, regex fallback.
 
 import json
 import re
-import shutil
-import subprocess
 from .spec import RingBufferSpec, RingBufferMode, ElementType
 
 
@@ -65,42 +63,15 @@ SYSTEM_PROMPT = (
 )
 
 
-def intent_to_ringbuf_claude(intent: str) -> RingBufferSpec | None:
-    """Use Claude CLI to translate intent → RingBufferSpec."""
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        return None
-
-    try:
-        result = subprocess.run(
-            [
-                claude_bin, "-p",
-                "--output-format", "json",
-                "--system-prompt", SYSTEM_PROMPT,
-                "--json-schema", JSON_SCHEMA,
-                "--tools", "",
-                "--model", "haiku",
-                intent,
-            ],
-            capture_output=True, text=True, timeout=60,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None
-
-    if result.returncode != 0:
-        return None
-
-    try:
-        response = json.loads(result.stdout)
-        params = response.get("structured_output")
-        if params and isinstance(params, dict):
+def intent_to_ringbuf_llm(intent: str) -> RingBufferSpec | None:
+    """Use LLM backend to translate intent → RingBufferSpec."""
+    from . import llm
+    params = llm.structured(intent, SYSTEM_PROMPT, JSON_SCHEMA, timeout=60)
+    if params and isinstance(params, dict):
+        try:
             return _params_to_spec(params)
-        raw = response.get("result", "")
-        if isinstance(raw, str):
-            return _params_to_spec(json.loads(raw))
-    except (json.JSONDecodeError, KeyError, TypeError):
-        pass
-
+        except (KeyError, TypeError):
+            pass
     return None
 
 
@@ -189,10 +160,11 @@ def intent_to_ringbuf_regex(intent: str) -> RingBufferSpec:
 # ── Public API ──
 
 def intent_to_ringbuf(intent: str) -> RingBufferSpec:
-    """Translate natural language → RingBufferSpec. Claude first, regex fallback."""
-    spec = intent_to_ringbuf_claude(intent)
+    """Translate natural language → RingBufferSpec. LLM first, regex fallback."""
+    from . import llm
+    spec = intent_to_ringbuf_llm(intent)
     if spec is not None:
-        print("  (translated by Claude via CLI)")
+        print(f"  (translated by {llm.get_backend()})")
         return spec
 
     print("  (translated by regex fallback)")

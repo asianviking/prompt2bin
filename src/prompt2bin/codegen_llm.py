@@ -9,7 +9,6 @@ Safety net: GCC compilation check + optional test harness.
 Falls back to template codegen if LLM fails.
 """
 
-import json
 import os
 import re
 import shutil
@@ -126,32 +125,10 @@ def _gcc_check(c_code: str) -> tuple[bool, str]:
         os.unlink(c_path)
 
 
-def _call_claude(prompt: str, attempt: int = 1) -> str | None:
-    """Call Claude CLI and return raw text output."""
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        return None
-
-    try:
-        result = subprocess.run(
-            [
-                claude_bin, "-p",
-                "--system-prompt", SYSTEM_PROMPT,
-                "--tools", "",
-                "--model", "haiku",
-                prompt,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=90,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None
-
-    if result.returncode != 0:
-        return None
-
-    return result.stdout
+def _call_llm(prompt: str, attempt: int = 1) -> str | None:
+    """Call LLM backend and return raw text output."""
+    from . import llm
+    return llm.generate(prompt, SYSTEM_PROMPT, timeout=90)
 
 
 def generate_c_llm(
@@ -168,7 +145,7 @@ def generate_c_llm(
     prompt = _spec_to_prompt(spec, verified_properties)
 
     for attempt in range(1, max_retries + 2):
-        raw = _call_claude(prompt)
+        raw = _call_llm(prompt)
         if raw is None:
             return None
 

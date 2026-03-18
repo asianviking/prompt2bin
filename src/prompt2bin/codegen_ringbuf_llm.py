@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from . import llm
 from .spec import RingBufferSpec, RingBufferMode
 
 
@@ -92,37 +93,18 @@ def generate_ringbuf_llm(
     verified_properties: list[str] | None = None,
     max_retries: int = 1,
 ) -> str | None:
-    """Generate ring buffer C code via Claude CLI. Returns None on failure."""
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        return None
-
+    """Generate ring buffer C code via LLM backend. Returns None on failure."""
     prompt = _spec_to_prompt(spec, verified_properties)
 
     for attempt in range(1, max_retries + 2):
-        try:
-            result = subprocess.run(
-                [
-                    claude_bin, "-p",
-                    "--system-prompt", SYSTEM_PROMPT,
-                    "--tools", "",
-                    "--model", "haiku",
-                    prompt,
-                ],
-                capture_output=True, text=True, timeout=180,
-            )
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        raw = llm.generate(prompt, SYSTEM_PROMPT, timeout=180)
+        if not raw:
+            print(f"  LLM returned no output")
             return None
 
-        if result.returncode != 0:
-            print(f"  Claude CLI returned exit code {result.returncode}")
-            if result.stderr:
-                print(f"  stderr: {result.stderr[:200]}")
-            return None
-
-        c_code = _extract_c_code(result.stdout)
+        c_code = _extract_c_code(raw)
         if not c_code or len(c_code) < 50:
-            print(f"  Claude returned insufficient code ({len(c_code)} chars)")
+            print(f"  LLM returned insufficient code ({len(c_code) if c_code else 0} chars)")
             continue
 
         ok, err = _gcc_check(c_code)

@@ -387,25 +387,26 @@ def interactive():
 
 def check_dependencies():
     """Check for required external tools and print helpful messages."""
-    missing = []
+    from . import llm
+
     gcc = shutil.which("gcc")
-    claude = shutil.which("claude")
-
     if not gcc:
-        missing.append(("gcc", "Install GCC: apt install gcc (Linux) / xcode-select --install (macOS)"))
-    if not claude:
-        missing.append(("claude", "Install Claude CLI: https://docs.anthropic.com/en/docs/claude-cli"))
+        print("\n  ✗ GCC not found.")
+        print("    Install: apt install gcc (Linux) / xcode-select --install (macOS)")
+        print("  GCC is required. Cannot continue.")
+        sys.exit(1)
 
-    if missing:
-        print("\n  Missing dependencies:\n")
-        for name, hint in missing:
-            print(f"    ✗ {name} — {hint}")
+    backend = llm.get_backend()
+    has_claude = shutil.which("claude")
+    has_openai = os.environ.get("OPENAI_API_KEY")
+
+    if not has_claude and not has_openai:
+        print("\n  ⚠ No LLM backend found. Will fall back to regex parsing (less accurate).")
+        print("    Option 1: Install Claude CLI — https://docs.anthropic.com/en/docs/claude-cli")
+        print("    Option 2: Set OPENAI_API_KEY env var — pip install openai")
         print()
-        if not gcc:
-            print("  GCC is required. Cannot continue.")
-            sys.exit(1)
-        if not claude:
-            print("  ⚠ Claude CLI not found. Will fall back to regex parsing (less accurate).\n")
+    else:
+        print(f"  LLM backend: {backend}")
 
 
 def show_help(cmd: str):
@@ -421,6 +422,15 @@ def show_help(cmd: str):
     {cmd} --help                          Show this help
 
   Templates: {', '.join(TEMPLATES)}
+
+  LLM backends (auto-detected, or set P2B_BACKEND):
+    claude    Claude CLI (default if installed)
+    openai    OpenAI API (set OPENAI_API_KEY, pip install openai)
+
+  Environment variables:
+    P2B_BACKEND        Force backend: "claude" or "openai"
+    P2B_OPENAI_MODEL   OpenAI model (default: gpt-4o-mini)
+    OPENAI_API_KEY     Required for OpenAI backend
 
   Examples:
     {cmd} init my_game --template game-engine
