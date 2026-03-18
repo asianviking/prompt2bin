@@ -385,8 +385,55 @@ def interactive():
         compile_pipeline(intent)
 
 
+def check_dependencies():
+    """Check for required external tools and print helpful messages."""
+    missing = []
+    gcc = shutil.which("gcc")
+    claude = shutil.which("claude")
+
+    if not gcc:
+        missing.append(("gcc", "Install GCC: apt install gcc (Linux) / xcode-select --install (macOS)"))
+    if not claude:
+        missing.append(("claude", "Install Claude CLI: https://docs.anthropic.com/en/docs/claude-cli"))
+
+    if missing:
+        print("\n  Missing dependencies:\n")
+        for name, hint in missing:
+            print(f"    ✗ {name} — {hint}")
+        print()
+        if not gcc:
+            print("  GCC is required. Cannot continue.")
+            sys.exit(1)
+        if not claude:
+            print("  ⚠ Claude CLI not found. Will fall back to regex parsing (less accurate).\n")
+
+
+def show_help(cmd: str):
+    """Print usage help."""
+    print(f"""
+  prompt2bin — from natural language to verified machine code
+
+  Usage:
+    {cmd} init <name> [--template <t>]   Scaffold a new project
+    {cmd} build [dir]                     Build all components in a project
+    {cmd} "<prompt>"                      One-shot: compile a single prompt
+    {cmd} --interactive                   Interactive mode
+    {cmd} --help                          Show this help
+
+  Templates: {', '.join(TEMPLATES)}
+
+  Examples:
+    {cmd} init my_game --template game-engine
+    {cmd} build my_game
+    {cmd} "I need a memory pool, 4KB, 16-byte aligned"
+""")
+
+
 def main():
     cmd = Path(sys.argv[0]).stem  # "p2b" or "prompt2bin"
+    if len(sys.argv) > 1 and sys.argv[1] in ("--help", "-h", "help"):
+        show_help(cmd)
+        sys.exit(0)
     if len(sys.argv) < 2 or sys.argv[1] == "--interactive":
         interactive()
     elif sys.argv[1] == "init":
@@ -418,10 +465,12 @@ def main():
             print(f"\n  ✗ {e}")
             sys.exit(1)
     elif sys.argv[1] == "build":
+        check_dependencies()
         project_dir = sys.argv[2] if len(sys.argv) > 2 else "."
         success = build_project(project_dir)
         sys.exit(0 if success else 1)
     else:
+        check_dependencies()
         intent = " ".join(sys.argv[1:])
         success = compile_pipeline(intent)
         sys.exit(0 if success else 1)
