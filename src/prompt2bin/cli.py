@@ -147,8 +147,9 @@ def show_assembly_highlights(asm_path: str, func_name: str, label: str):
             print(f"    ... ({len(instructions) - 25} more)")
 
 
-def compile_pipeline(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
-    """Full pipeline: intent → spec → verify → C code → assembly → binary."""
+def compile_pipeline(intent: str, output_dir: str = ".", name_override: str | None = None) -> tuple[bool, str]:
+    """Full pipeline: intent → spec → verify → C code → assembly → binary.
+    Returns (success, domain)."""
     print(f"\n{'─' * 60}")
     print(f"  INPUT: {intent}")
     print(f"{'─' * 60}")
@@ -157,9 +158,9 @@ def compile_pipeline(intent: str, output_dir: str = ".", name_override: str | No
     print(f"\n  Domain: {domain}")
 
     if domain == "ringbuf":
-        return _compile_ringbuf(intent, output_dir, name_override)
+        return _compile_ringbuf(intent, output_dir, name_override), domain
     else:
-        return _compile_arena(intent, output_dir, name_override)
+        return _compile_arena(intent, output_dir, name_override), domain
 
 
 def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
@@ -322,18 +323,20 @@ def build_project(project_dir: str = ".") -> bool:
     print(f"{'═' * 60}")
 
     results = {}
+    domains = {}
     for comp_name, comp in project.components.items():
         print(f"\n{'━' * 60}")
         print(f"  Building component: {comp_name}")
         print(f"  Prompt: {comp.prompt_path}")
         print(f"{'━' * 60}")
 
-        ok = compile_pipeline(
+        ok, domain = compile_pipeline(
             comp.prompt_text,
             output_dir=str(build_dir),
             name_override=comp_name,
         )
         results[comp_name] = ok
+        domains[comp_name] = domain
 
     # ── Build summary ──
     passed = [k for k, v in results.items() if v]
@@ -352,12 +355,144 @@ def build_project(project_dir: str = ".") -> bool:
         for name in failed:
             print(f"      {name}")
 
+    # ── Generate main.c ──
+    if passed:
+        main_path = generate_main_c(build_dir, passed, domains)
+        print(f"  main.c: {main_path}")
+
     print(f"")
     print(f"  Output: {build_dir}/")
-    print(f"  Include: -I{build_dir}")
+    if passed:
+        cmd = Path(sys.argv[0]).stem
+        print(f"  Run:    {cmd} run {project.project_dir}")
     print(f"{'═' * 60}\n")
 
     return len(failed) == 0
+
+
+def generate_main_c(build_dir: Path, components: list[str], domains: dict[str, str]) -> Path:
+    """Generate a main.c that exercises all built components."""
+    lines = [
+        '#include <stdio.h>',
+        '#include <string.h>',
+        '',
+    ]
+
+    for name in components:
+        lines.append(f'#include "{name}.h"')
+
+    lines.extend(['', 'int main(void) {'])
+
+    for name in components:
+        domain = domains.get(name, "arena")
+        lines.append(f'')
+        lines.append(f'    // ── {name} ──')
+
+        if domain == "ringbuf":
+            lines.extend([
+                f'    printf("--- {name} ---\\n");',
+                f'    {name}_t *{name} = {name}_create();',
+                f'    if (!{name}) {{ printf("  create failed\\n"); return 1; }}',
+                f'    printf("  created\\n");',
+                f'',
+                f'    // Push some messages',
+                f'    char {name}_msg[256];',
+                f'    memset({name}_msg, 0, sizeof({name}_msg));',
+                f'    for (int i = 0; i < 5; i++) {{',
+                f'        snprintf({name}_msg, sizeof({name}_msg), "message %d", i);',
+                f'        int ok = {name}_push({name}, {name}_msg);',
+                f'        printf("  push [%d]: %s\\n", i, ok == 0 ? "ok" : "full");',
+                f'    }}',
+                f'',
+                f'    // Pop them back',
+                f'    char {name}_out[256];',
+                f'    for (int i = 0; i < 5; i++) {{',
+                f'        int ok = {name}_pop({name}, {name}_out);',
+                f'        if (ok == 0) printf("  pop [%d]: %s\\n", i, {name}_out);',
+                f'    }}',
+                f'',
+                f'    {name}_destroy({name});',
+                f'    printf("  destroyed\\n\\n");',
+            ])
+        else:  # arena
+            lines.extend([
+                f'    printf("--- {name} ---\\n");',
+                f'    {name}_t *{name} = {name}_create();',
+                f'    if (!{name}) {{ printf("  create failed\\n"); return 1; }}',
+                f'    printf("  created\\n");',
+                f'',
+                f'    // Allocate some memory',
+                f'    void *p1 = {name}_alloc({name}, 64);',
+                f'    void *p2 = {name}_alloc({name}, 128);',
+                f'    void *p3 = {name}_alloc({name}, 256);',
+                f'    printf("  alloc 64B:  %s\\n", p1 ? "ok" : "failed");',
+                f'    printf("  alloc 128B: %s\\n", p2 ? "ok" : "failed");',
+                f'    printf("  alloc 256B: %s\\n", p3 ? "ok" : "failed");',
+                f'',
+                f'    {name}_reset({name});',
+                f'    printf("  reset\\n");',
+                f'',
+                f'    {name}_destroy({name});',
+                f'    printf("  destroyed\\n\\n");',
+            ])
+
+    lines.extend([
+        '',
+        '    printf("All components working.\\n");',
+        '    return 0;',
+        '}',
+        '',
+    ])
+
+    main_path = build_dir / "main.c"
+    main_path.write_text('\n'.join(lines))
+    return main_path
+
+
+def run_project(project_dir: str = ".") -> bool:
+    """Build, compile main.c, and run."""
+    if not build_project(project_dir):
+        return False
+
+    project = load_project(project_dir)
+    build_dir = project.build_dir
+    main_c = build_dir / "main.c"
+
+    if not main_c.exists():
+        print("  ✗ No main.c found in build/")
+        return False
+
+    gcc = shutil.which("gcc")
+    binary = build_dir / project.name
+    headers = [str(build_dir / f"{name}.h") for name in project.components]
+
+    # Compile main.c with all headers accessible
+    compile_cmd = [
+        gcc, "-o", str(binary),
+        str(main_c),
+        f"-I{build_dir}",
+        "-lpthread",
+    ]
+
+    print(f"\n▸ Compiling main.c...")
+    result = subprocess.run(compile_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"  ✗ Compilation failed:\n{result.stderr}")
+        return False
+
+    print(f"  ✓ {binary}")
+
+    # Run it
+    print(f"\n▸ Running {project.name}...\n")
+    result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+    print(result.stdout)
+    if result.returncode != 0:
+        print(f"  ✗ Exited with code {result.returncode}")
+        if result.stderr:
+            print(result.stderr)
+        return False
+
+    return True
 
 
 # ── CLI ──
@@ -374,7 +509,7 @@ def interactive():
             break
         if not intent or intent.lower() in ("quit", "exit", "q"):
             break
-        compile_pipeline(intent)
+        compile_pipeline(intent)  # ignore domain return
 
 
 def check_dependencies():
@@ -412,6 +547,7 @@ def show_help(cmd: str):
   Usage:
     {cmd} init <name> [--template <t>]   Scaffold a new project
     {cmd} build [dir]                     Build all components in a project
+    {cmd} run [dir]                       Build + compile + run
     {cmd} "<prompt>"                      One-shot: compile a single prompt
     {cmd} --interactive                   Interactive mode
     {cmd} --help                          Show this help
@@ -474,7 +610,7 @@ def main():
             print(f"")
             print(f"    Next steps:")
             print(f"      1. Review specs/ and edit prompts to your needs")
-            print(f"      2. {cmd} build {project_name}")
+            print(f"      2. {cmd} run {project_name}")
             print()
         except (FileExistsError, ValueError) as e:
             print(f"\n  ✗ {e}")
@@ -484,10 +620,15 @@ def main():
         project_dir = sys.argv[2] if len(sys.argv) > 2 else "."
         success = build_project(project_dir)
         sys.exit(0 if success else 1)
+    elif sys.argv[1] == "run":
+        check_dependencies()
+        project_dir = sys.argv[2] if len(sys.argv) > 2 else "."
+        success = run_project(project_dir)
+        sys.exit(0 if success else 1)
     else:
         check_dependencies()
         intent = " ".join(sys.argv[1:])
-        success = compile_pipeline(intent)
+        success, _ = compile_pipeline(intent)
         sys.exit(0 if success else 1)
 
 
