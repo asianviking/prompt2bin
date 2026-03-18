@@ -38,7 +38,7 @@ from .codegen_ringbuf_llm import generate_ringbuf_llm
 from .test_ringbuf import run_ringbuf_test
 
 # Project system
-from .project import load_project, ensure_build_dir, init_project
+from .project import load_project, ensure_build_dir, init_project, TEMPLATES
 
 
 BANNER = """
@@ -390,17 +390,30 @@ def main():
         interactive()
     elif sys.argv[1] == "init":
         if len(sys.argv) < 3:
-            print("Usage: prompt2bin init <project_name>")
+            print("Usage: prompt2bin init <project_name> [--template <name>]")
             sys.exit(1)
+        project_name = sys.argv[2]
+        template = None
+        if "--template" in sys.argv:
+            idx = sys.argv.index("--template")
+            if idx + 1 < len(sys.argv):
+                template = sys.argv[idx + 1]
+            else:
+                print(f"Available templates: {', '.join(TEMPLATES)}")
+                sys.exit(1)
         try:
-            path = init_project(sys.argv[2])
+            path, used_template = init_project(project_name, template)
+            tmpl = TEMPLATES[used_template]
+            components = list(tmpl["components"].keys())
             print(f"\n  ✓ Created project at {path}/")
+            print(f"    Template: {used_template} — {tmpl['description']}")
+            print(f"    Components: {', '.join(components)}")
             print(f"")
-            print(f"    1. Edit specs/example.prompt (or add more .prompt files)")
-            print(f"    2. Update build.toml with your components")
-            print(f"    3. Run: prompt2bin build {sys.argv[2]}")
+            print(f"    Next steps:")
+            print(f"      1. Review specs/ and edit prompts to your needs")
+            print(f"      2. prompt2bin build {project_name}")
             print()
-        except FileExistsError as e:
+        except (FileExistsError, ValueError) as e:
             print(f"\n  ✗ {e}")
             sys.exit(1)
     elif sys.argv[1] == "build":

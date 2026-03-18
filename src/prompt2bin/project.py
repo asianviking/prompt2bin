@@ -102,37 +102,128 @@ def ensure_build_dir(project: ProjectConfig) -> Path:
     return build_dir
 
 
-def init_project(project_dir: str | Path) -> Path:
+TEMPLATES = {
+    "blank": {
+        "description": "Empty project with one example prompt",
+        "components": {
+            "example": "I need a simple arena allocator with 4KB pages and 16-byte alignment.",
+        },
+    },
+    "game-engine": {
+        "description": "Game engine primitives — frame allocator, event queue, object pool",
+        "components": {
+            "frame_alloc": (
+                "I need a fast arena allocator for per-frame scratch memory in a game engine. "
+                "4KB pages, 16-byte alignment, single-threaded, zero memory on reset for safety."
+            ),
+            "event_queue": (
+                "I need a lock-free SPSC ring buffer for passing 64-byte event structs "
+                "between a game's input thread and render thread. 256 slots, no data loss."
+            ),
+            "object_pool": (
+                "I need an arena allocator for a game object pool. Fixed 1MB capacity, "
+                "64-byte alignment for cache-friendly access, single-threaded, no growth needed."
+            ),
+        },
+    },
+    "network-stack": {
+        "description": "Network service primitives — packet buffer, connection pool, async I/O queue",
+        "components": {
+            "packet_buffer": (
+                "I need an arena allocator for network packet assembly. 8KB pages to fit jumbo frames, "
+                "8-byte alignment, single-threaded, 64 pages max. Zero on reset for security."
+            ),
+            "connection_pool": (
+                "I need an arena allocator for tracking TCP connections. Fixed 256KB capacity, "
+                "64-byte alignment for cache lines, single-threaded. Each connection struct is ~128 bytes."
+            ),
+            "io_queue": (
+                "I need a lock-free SPSC ring buffer for async I/O completion events. "
+                "Each event is 32 bytes, 1024 slots. Must not lose events."
+            ),
+        },
+    },
+    "audio-pipeline": {
+        "description": "Audio/media pipeline — sample buffer, processing scratch, command queue",
+        "components": {
+            "sample_buffer": (
+                "I need a lock-free SPSC ring buffer for streaming audio samples between "
+                "capture and processing threads. 4-byte float elements, 4096 slots for ~85ms at 48kHz."
+            ),
+            "processing_scratch": (
+                "I need an arena allocator for temporary audio DSP scratch memory. "
+                "16KB pages, 32-byte alignment for SIMD, single-threaded, zero on reset."
+            ),
+            "command_queue": (
+                "I need a lock-free SPSC ring buffer for sending 16-byte control messages "
+                "from the UI thread to the audio thread. 128 slots, no data loss, non-blocking."
+            ),
+        },
+    },
+}
+
+
+def _pick_template_interactive() -> str:
+    """Interactive template picker. Returns template name."""
+    print("\n  What are you building?\n")
+    templates = list(TEMPLATES.items())
+    for i, (name, tmpl) in enumerate(templates):
+        marker = ">" if i == 0 else " "
+        print(f"    {i + 1}) {name:20s} {tmpl['description']}")
+
+    print()
+    while True:
+        try:
+            choice = input("  Pick a template [1]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return "blank"
+        if not choice:
+            return templates[0][0]
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(templates):
+                return templates[idx][0]
+        except ValueError:
+            if choice in TEMPLATES:
+                return choice
+        print(f"    Enter 1-{len(templates)} or a template name.")
+
+
+def init_project(project_dir: str | Path, template: str | None = None) -> tuple[Path, str]:
     """
     Scaffold a new prompt2bin project.
 
-    Creates:
-        project_dir/
-        ├── build.toml
-        └── specs/
-            └── example.prompt
+    Returns (project_path, template_name).
     """
     project_dir = Path(project_dir)
 
     if (project_dir / "build.toml").exists():
         raise FileExistsError(f"build.toml already exists in {project_dir}")
 
+    if template is None:
+        template = _pick_template_interactive()
+
+    if template not in TEMPLATES:
+        raise ValueError(f"Unknown template: {template}. Available: {', '.join(TEMPLATES)}")
+
+    tmpl = TEMPLATES[template]
+    components = tmpl["components"]
+
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "specs").mkdir(exist_ok=True)
 
     name = project_dir.resolve().name
 
-    (project_dir / "build.toml").write_text(f"""\
-[project]
-name = "{name}"
-target = "x86-64-linux"
+    # Write build.toml
+    lines = [f'[project]\nname = "{name}"\ntarget = "x86-64-linux"\n']
+    for comp_name in components:
+        lines.append(f"[components.{comp_name}]")
+        lines.append(f'prompt = "specs/{comp_name}.prompt"\n')
+    (project_dir / "build.toml").write_text("\n".join(lines))
 
-[components.example]
-prompt = "specs/example.prompt"
-""")
+    # Write .prompt files
+    for comp_name, prompt_text in components.items():
+        (project_dir / "specs" / f"{comp_name}.prompt").write_text(prompt_text + "\n")
 
-    (project_dir / "specs" / "example.prompt").write_text(
-        "I need a simple arena allocator with 4KB pages and 16-byte alignment.\n"
-    )
-
-    return project_dir.resolve()
+    return project_dir.resolve(), template
