@@ -6,17 +6,14 @@ An AI-first compiler. Natural language in, verified machine code out.
 
 Most programming languages were designed for humans to communicate with machines. But if AI can translate intent directly, why write code at all?
 
-**prompt2bin** skips the language entirely. You describe what you need in plain English. A formal verification engine (Z3) proves your spec is safe. An LLM generates the C implementation. A test harness validates correctness at runtime. GCC compiles it down to x86-64 assembly and machine code.
+**prompt2bin** skips the language entirely. You describe what you need in plain English — both the components and the application that wires them together. A formal verification engine (Z3) proves each spec is safe. An LLM generates the C implementation. A test harness validates correctness at runtime. GCC compiles it down to x86-64 assembly and machine code.
 
 No syntax to learn. No language to master. Just intent → verified binary.
 
 ```
-"I need a lock-free ring buffer for audio, 4096 float samples"
-    → formal spec (structured, machine-readable)
-    → Z3 proves 7 safety properties
-    → LLM generates C code
-    → test harness validates runtime behavior
-    → x86-64 assembly + linkable machine code
+Component prompts → formal specs → Z3 proves safety → LLM generates C components
+App prompt → LLM generates main.c wiring everything together
+GCC → x86-64 assembly + linkable machine code → working application
 ```
 
 ## Why this matters
@@ -30,20 +27,26 @@ This is a prototype exploring that future. It works today for multiple domains (
 ## How it works
 
 ```
-English intent
+Component .prompt files (one per component)
      ↓
 Claude CLI → formal spec (structured, machine-readable)
      ↓
 Z3 SMT solver → proves safety properties (blocks codegen on failure)
      ↓
-Claude LLM → generates C code (header-only library)
+Claude LLM → generates C code (header-only library per component)
      ↓
 Test harness → compiles and runs validation tests
      ↓
 GCC → x86-64 assembly (.s) + machine code (.o)
+
+app.prompt (describes the whole application)
+     ↓
+LLM + component headers → generates main.c (the glue code)
+     ↓
+GCC → final linked binary
 ```
 
-Every stage is a quality gate. Z3 blocks code generation if any safety property fails. The test harness catches runtime bugs the formal proof can't cover. GCC catches anything the LLM got syntactically wrong. If any gate fails, you get a clear error — not a broken binary.
+Every stage is a quality gate. Z3 blocks code generation if any safety property fails. The test harness catches runtime bugs the formal proof can't cover. GCC catches anything the LLM got syntactically wrong. The app.prompt generation validates against component headers with GCC and retries on failure. If any gate fails, you get a clear error — not a broken binary.
 
 ## Install
 
@@ -75,32 +78,43 @@ p2b --interactive            # interactive mode
 
 ## Project builds
 
-A project is a directory with a `build.toml` and `.prompt` files:
+A project is a directory with a `build.toml`, component `.prompt` files, and an `app.prompt`:
 
 ```
 my_project/
 ├── build.toml
+├── app.prompt                # describes the application: what it does, how components wire together
 ├── specs/
-│   ├── memory_pool.prompt    # "I need a memory pool for allocating small objects..."
-│   └── message_queue.prompt  # "I need a queue for passing messages between two threads..."
-└── build/                    # generated: .h .s .o for each component
+│   ├── memory_pool.prompt    # “I need a memory pool for allocating small objects...”
+│   └── message_queue.prompt  # “I need a queue for passing messages between two threads...”
+└── build/                    # generated: .h .s .o for each component + main.c
 ```
 
 ```toml
 [project]
-name = "my_project"
-target = "x86-64-linux"
+name = “my_project”
+target = “x86-64-linux”
 
 [components.memory_pool]
-prompt = "specs/memory_pool.prompt"
+prompt = “specs/memory_pool.prompt”
 
 [components.message_queue]
-prompt = "specs/message_queue.prompt"
+prompt = “specs/message_queue.prompt”
 ```
 
-`prompt2bin build` reads each `.prompt` file, runs the full pipeline, and outputs all artifacts to `build/`.
+The `app.prompt` describes what the application does — how the components work together as a whole:
 
-See `sample_project/` for a minimal starter project, and `sample_grok_cli/` for a multi-component “AI CLI” style demo.
+```
+Interactive demo that allocates objects and passes messages.
+- Allocate several small objects from memory_pool
+- Push numbered messages into message_queue from a producer loop
+- Pop and print all messages from a consumer loop
+- Clean up and exit with a summary
+```
+
+`prompt2bin build` reads each component `.prompt` file, runs the full pipeline, then uses the `app.prompt` + generated component headers to produce a complete `main.c` via LLM. Every piece of code — components and application glue — is generated from prompts.
+
+See `sample_project/` for a minimal starter project, and `sample_grok_cli/` for a multi-component interactive CLI that calls the xAI Grok API.
 
 ## Domains
 
@@ -218,9 +232,9 @@ All source lives in `src/prompt2bin/`:
 
 | Module | Role |
 |--------|------|
-| `cli.py` | Pipeline orchestrator + project build system |
+| `cli.py` | Pipeline orchestrator + project build system + LLM-based main.c generation |
 | `llm.py` | LLM backend abstraction (Claude CLI / Codex CLI / Anthropic API / OpenAI API) |
-| `project.py` | TOML project loader (`build.toml` → component configs) |
+| `project.py` | TOML project loader (`build.toml` + `app.prompt` → project config) |
 | `spec.py` | Formal spec formats (ArenaSpec, RingBufferSpec, ProcessSpawnerSpec, StringTableSpec, TermIOSpec) |
 | `intent.py` | Arena intent translator (Claude CLI + regex fallback) |
 | `intent_ringbuf.py` | Ring buffer intent translator |
