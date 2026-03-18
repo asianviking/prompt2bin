@@ -17,6 +17,15 @@ import tempfile
 import os
 from pathlib import Path
 
+
+def _relpath(p) -> str:
+    """Make a path relative to CWD for cleaner log output."""
+    try:
+        return os.path.relpath(str(p))
+    except ValueError:
+        return str(p)
+
+
 # Arena domain
 from .intent import intent_to_spec as intent_to_arena
 from .verify import verify_spec as verify_arena
@@ -283,7 +292,7 @@ def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {output_path} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
 
     print("\n▸ Phase 3b: Running test harness...")
     test_ok, test_msg = run_arena_test(spec, output_path)
@@ -339,7 +348,7 @@ def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | No
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {output_path} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
 
     print("\n▸ Phase 3b: Running test harness...")
     test_ok, test_msg = run_ringbuf_test(spec, output_path)
@@ -388,7 +397,7 @@ def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None 
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {output_path} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
 
     print("\n▸ Phase 3b: Running test harness...")
     test_ok, test_msg = run_proc_test(spec, output_path)
@@ -437,7 +446,7 @@ def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | Non
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {output_path} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
 
     print("\n▸ Phase 3b: Running test harness...")
     test_ok, test_msg = run_strtab_test(spec, output_path)
@@ -486,7 +495,7 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {output_path} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
 
     print("\n▸ Phase 3b: Running test harness...")
     test_ok, test_msg = run_termio_test(spec, output_path)
@@ -508,18 +517,18 @@ def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, outpu
     else:
         asm_size = os.path.getsize(asm_path)
         obj_size = os.path.getsize(obj_path)
-        print(f"  {asm_path:30s} — {asm_size:>6,} bytes (assembly)")
-        print(f"  {obj_path:30s} — {obj_size:>6,} bytes (machine code)")
+        print(f"  {_relpath(asm_path):30s} — {asm_size:>6,} bytes (assembly)")
+        print(f"  {_relpath(obj_path):30s} — {obj_size:>6,} bytes (machine code)")
         show_assembly_highlights(asm_path, hot_func, hot_label)
 
     print(f"\n{'═' * 60}")
     print(f"  ✓ Complete pipeline: English → verified machine code")
     print(f"")
-    print(f"    {output_path:30s}  C code ({lines} lines)")
+    print(f"    {_relpath(output_path):30s}  C code ({lines} lines)")
     if asm_path:
-        print(f"    {asm_path:30s}  x86-64 assembly")
+        print(f"    {_relpath(asm_path):30s}  x86-64 assembly")
     if obj_path:
-        print(f"    {obj_path:30s}  machine code (linkable)")
+        print(f"    {_relpath(obj_path):30s}  machine code (linkable)")
     print(f"")
     print(f"    Link into your program:")
     print(f"      #include \"{os.path.basename(output_path)}\"")
@@ -548,7 +557,7 @@ def build_project(project_dir: str = ".") -> bool:
     print(f"  prompt2bin build: {project.name}")
     print(f"  Target: {project.target}")
     print(f"  Components: {len(project.components)}")
-    print(f"  Output: {build_dir}/")
+    print(f"  Output: {_relpath(build_dir)}/")
     print(f"{'═' * 60}")
 
     results = {}
@@ -556,7 +565,7 @@ def build_project(project_dir: str = ".") -> bool:
     for comp_name, comp in project.components.items():
         print(f"\n{'━' * 60}")
         print(f"  Building component: {comp_name}")
-        print(f"  Prompt: {comp.prompt_path}")
+        print(f"  Prompt: {_relpath(comp.prompt_path)}")
         print(f"{'━' * 60}")
 
         ok, domain = compile_pipeline(
@@ -589,13 +598,13 @@ def build_project(project_dir: str = ".") -> bool:
     if passed:
         main_path = generate_main_c(build_dir, passed, domains, app_prompt=project.app_prompt)
         if main_path:
-            print(f"  main.c: {main_path}")
+            print(f"  main.c: {_relpath(main_path)}")
 
     print(f"")
-    print(f"  Output: {build_dir}/")
+    print(f"  Output: {_relpath(build_dir)}/")
     if main_path:
         cmd = Path(sys.argv[0]).stem
-        print(f"  Run:    {cmd} run {project.project_dir}")
+        print(f"  Run:    {cmd} run {_relpath(project.project_dir)}")
     print(f"{'═' * 60}\n")
 
     return len(failed) == 0 and main_path is not None
@@ -647,7 +656,7 @@ def _generate_main_c_llm(build_dir: Path, components: list[str],
         if header_path.exists():
             headers[name] = header_path.read_text()
         else:
-            print(f"  ⚠ Header not found: {header_path}")
+            print(f"  ⚠ Header not found: {_relpath(header_path)}")
             return None
 
     # Build the prompt
@@ -903,7 +912,7 @@ def main():
             path, used_template = init_project(project_name, template)
             tmpl = TEMPLATES[used_template]
             components = list(tmpl["components"].keys())
-            print(f"\n  ✓ Created project at {path}/")
+            print(f"\n  ✓ Created project at {_relpath(path)}/")
             print(f"    Template: {used_template} — {tmpl['description']}")
             print(f"    Components: {', '.join(components)}")
             print(f"")
