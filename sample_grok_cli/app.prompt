@@ -1,0 +1,13 @@
+Interactive CLI for the xAI Grok API.
+- Read user input via input_handler (show "grok> " prompt, quit on "quit" or EOF)
+- Store conversation history in context_store (user and assistant messages as strings)
+- Call the Grok API via api_caller using curl with JSON chat completions format
+  (POST to https://api.x.ai/v1/chat/completions with Authorization: Bearer $XAI_API_KEY)
+- Buffer streaming responses through response_buffer
+- Parse the JSON response to extract the assistant's message content
+- Print assistant responses, loop until user quits
+- Use XAI_API_KEY env var for auth (exit with error if not set)
+- Use XAI_MODEL env var for model (default grok-4-0709)
+- Maintain multi-turn conversation by sending full message history each request
+- Handle JSON escaping for user input (escape quotes, backslashes, newlines)
+- Rotate oldest messages when context_store is full

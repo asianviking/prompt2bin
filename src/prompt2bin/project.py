@@ -31,6 +31,7 @@ class ProjectConfig:
     target: str
     components: dict[str, ComponentConfig]
     project_dir: Path = field(default_factory=lambda: Path("."))
+    app_prompt: str | None = None
 
     @property
     def build_dir(self) -> Path:
@@ -87,11 +88,22 @@ def load_project(project_dir: str | Path = ".") -> ProjectConfig:
     if not components:
         raise ValueError("No components defined in build.toml")
 
+    # Load app.prompt if it exists
+    app_prompt = None
+    app_prompt_path = project_dir / "app.prompt"
+    if not app_prompt_path.exists():
+        app_prompt_path = project_dir / "specs" / "app.prompt"
+    if app_prompt_path.exists():
+        app_prompt = app_prompt_path.read_text().strip()
+        if not app_prompt:
+            app_prompt = None
+
     return ProjectConfig(
         name=name,
         target=target,
         components=components,
         project_dir=project_dir,
+        app_prompt=app_prompt,
     )
 
 
@@ -105,6 +117,15 @@ def ensure_build_dir(project: ProjectConfig) -> Path:
 TEMPLATES = {
     "starter": {
         "description": "A memory pool and a message queue — the simplest demo",
+        "app_prompt": (
+            "Interactive demo that allocates objects and passes messages.\n"
+            "- Allocate several small objects (16, 32, 64 bytes) from memory_pool\n"
+            "- Write a tag string into each allocated block to prove it works\n"
+            "- Push 10 numbered messages into message_queue from a producer loop\n"
+            "- Pop and print all messages from a consumer loop\n"
+            "- Print pool usage stats between allocations\n"
+            "- Clean up and exit with a summary of operations performed"
+        ),
         "components": {
             "memory_pool": (
                 "I need a memory pool for allocating small objects. "
@@ -118,6 +139,16 @@ TEMPLATES = {
     },
     "game-engine": {
         "description": "Game engine — frame allocator, event queue, object pool",
+        "app_prompt": (
+            "Simulated game loop that exercises all three engine components.\n"
+            "- Run a fixed number of frames (e.g. 60) in a loop\n"
+            "- Each frame: reset frame_alloc, allocate scratch memory for transform matrices\n"
+            "- Generate synthetic input events (key press, mouse move) and push into event_queue\n"
+            "- Drain event_queue and print each event\n"
+            "- Allocate game objects (player, enemies, projectiles) from object_pool\n"
+            "- Print per-frame stats: allocations, events processed, objects alive\n"
+            "- After the loop, print a summary and clean up all resources"
+        ),
         "components": {
             "frame_alloc": (
                 "I need a fast arena allocator for per-frame scratch memory in a game engine. "
@@ -135,6 +166,17 @@ TEMPLATES = {
     },
     "network-stack": {
         "description": "Network service — packet buffer, connection pool, async I/O queue",
+        "app_prompt": (
+            "Simulated network server that processes connections and packets.\n"
+            "- Allocate a batch of simulated connections (each ~128 bytes) from connection_pool\n"
+            "- For each connection, assemble a fake packet in packet_buffer (write header + payload)\n"
+            "- Push I/O completion events into io_queue as each packet is assembled\n"
+            "- Drain io_queue and print each completion event (connection id, bytes transferred)\n"
+            "- Simulate connection teardown: reset packet_buffer between batches\n"
+            "- Run 3 batches of 10 connections each\n"
+            "- Print throughput summary: total connections, packets, bytes processed\n"
+            "- Clean up all resources and exit"
+        ),
         "components": {
             "packet_buffer": (
                 "I need an arena allocator for network packet assembly. 8KB pages to fit jumbo frames, "
@@ -152,6 +194,18 @@ TEMPLATES = {
     },
     "audio-pipeline": {
         "description": "Audio/media — sample buffer, processing scratch, command queue",
+        "app_prompt": (
+            "Simulated audio processing pipeline that captures, processes, and plays samples.\n"
+            "- Generate synthetic audio samples (sine wave at 440Hz, 48kHz sample rate)\n"
+            "- Push samples into sample_buffer as a producer (simulate capture thread)\n"
+            "- Send control commands via command_queue (start, set volume, set frequency, stop)\n"
+            "- Consumer loop: drain command_queue and apply settings, then pop samples from sample_buffer\n"
+            "- Use processing_scratch for temporary DSP work (e.g. apply gain to a batch of samples)\n"
+            "- Print stats every 1024 samples: buffer fill level, commands processed, peak amplitude\n"
+            "- Process 5 seconds of audio (240000 samples), then send stop command\n"
+            "- Print final summary: total samples, underruns, commands processed\n"
+            "- Clean up all resources"
+        ),
         "components": {
             "sample_buffer": (
                 "I need a lock-free SPSC ring buffer for streaming audio samples between "
@@ -169,6 +223,21 @@ TEMPLATES = {
     },
     "grok-cli": {
         "description": "Grok CLI — xAI API via curl, context store, terminal I/O, response buffer",
+        "app_prompt": (
+            "Interactive CLI for the xAI Grok API.\n"
+            "- Read user input via input_handler (show \"grok> \" prompt, quit on \"quit\" or EOF)\n"
+            "- Store conversation history in context_store (user and assistant messages as strings)\n"
+            "- Call the Grok API via api_caller using curl with JSON chat completions format\n"
+            "  (POST to https://api.x.ai/v1/chat/completions with Authorization: Bearer $XAI_API_KEY)\n"
+            "- Buffer streaming responses through response_buffer\n"
+            "- Parse the JSON response to extract the assistant's message content\n"
+            "- Print assistant responses, loop until user quits\n"
+            "- Use XAI_API_KEY env var for auth (exit with error if not set)\n"
+            "- Use XAI_MODEL env var for model (default grok-4-0709)\n"
+            "- Maintain multi-turn conversation by sending full message history each request\n"
+            "- Handle JSON escaping for user input (escape quotes, backslashes, newlines)\n"
+            "- Rotate oldest messages when context_store is full"
+        ),
         "components": {
             "api_caller": (
                 "I need a process spawner for launching curl to call the xAI Grok API. "
@@ -257,5 +326,10 @@ def init_project(project_dir: str | Path, template: str | None = None) -> tuple[
     # Write .prompt files
     for comp_name, prompt_text in components.items():
         (project_dir / "specs" / f"{comp_name}.prompt").write_text(prompt_text + "\n")
+
+    # Write app.prompt if template has one
+    app_prompt = tmpl.get("app_prompt")
+    if app_prompt:
+        (project_dir / "app.prompt").write_text(app_prompt + "\n")
 
     return project_dir.resolve(), template
