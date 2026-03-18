@@ -2,6 +2,12 @@
 name = "sample_grok_cli"
 target = "x86-64-linux"
 
+# [model]
+# backend = "anthropic-api"       # claude, codex, anthropic-api, openai-api
+# name = "claude-sonnet-4-6"      # model ID passed to the backend
+# reasoning = "high"              # low, medium, high (optional, ignored if unsupported)
+# temperature = 0.2               # optional
+
 [components.api_caller]
 prompt = "specs/api_caller.prompt"
 
