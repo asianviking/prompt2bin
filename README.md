@@ -114,6 +114,13 @@ Interactive demo that allocates objects and passes messages.
 
 `prompt2bin build` reads each component `.prompt` file, runs the full pipeline, then uses the `app.prompt` + generated component headers to produce a complete `main.c` via LLM. Every piece of code — components and application glue — is generated from prompts.
 
+Two built-in templates to get started:
+
+```bash
+p2b init my_project --template starter     # memory pool + message queue demo
+p2b init my_project --template grok-cli    # interactive xAI Grok API client
+```
+
 See `sample_grok_cli/` for a complete example — an interactive CLI that calls the xAI Grok API, built entirely from prompts.
 
 ## Domains
