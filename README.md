@@ -1,33 +1,63 @@
 # prompt2bin
 
-AI-first compiler prototype. Natural language → formally verified C code.
+An AI-first compiler. Natural language in, verified machine code out.
+
+## The idea
+
+Most programming languages were designed for humans to communicate with machines. But if AI can translate intent directly, why write code at all?
+
+**prompt2bin** skips the language entirely. You describe what you need in plain English. A formal verification engine (Z3) proves your spec is safe. An LLM generates the C implementation. A test harness validates correctness at runtime. GCC compiles it down to x86-64 assembly and machine code.
+
+No syntax to learn. No language to master. Just intent → verified binary.
 
 ```
-"I need a fast game frame allocator, 64KB, nothing fancy"
+"I need a lock-free ring buffer for audio, 4096 float samples"
     → formal spec (structured, machine-readable)
-    → Z3 proves safety properties
-    → generates verified C code
+    → Z3 proves 7 safety properties
+    → LLM generates C code
+    → test harness validates runtime behavior
+    → x86-64 assembly + linkable machine code
 ```
+
+## Why this matters
+
+Programming languages are encoding schemes — structured ways to express intent so a compiler can turn it into machine code. Every language is a tradeoff between expressiveness and performance. Rust gives you memory safety but demands you think in lifetimes. Python gives you speed of expression but costs you runtime speed.
+
+What if the tradeoff disappears? If AI can go from intent to formally verified machine code, the "language" layer is just overhead. The compiler becomes the last translator you'll ever need — and it speaks English.
+
+This is a prototype exploring that future. It works today for two domains (arena allocators and ring buffers) and proves the architecture scales.
 
 ## How it works
 
 ```
-Human intent (natural language)
-        ↓
-   Claude CLI (translates intent → formal spec)
-        ↓
-   Z3 verification (proves overflow safety, alignment, memory bounds)
-        ↓
-   C code generation (header-only library)
+English intent
+     ↓
+Claude CLI → formal spec (structured, machine-readable)
+     ↓
+Z3 SMT solver → proves safety properties (blocks codegen on failure)
+     ↓
+Claude LLM → generates C code (header-only library)
+     ↓
+Test harness → compiles and runs validation tests
+     ↓
+GCC → x86-64 assembly (.s) + machine code (.o)
 ```
 
-The verifier blocks code generation if any safety property fails. Claude handles ambiguous intent ("maybe 64KB", "nothing fancy"); the regex fallback handles structured input when CLI is unavailable.
+Every stage is a quality gate. Z3 blocks code generation if any safety property fails. The test harness catches runtime bugs the formal proof can't cover. GCC catches anything the LLM got syntactically wrong. If any gate fails, you get a clear error — not a broken binary.
 
 ## Usage
+
+Single prompt:
 
 ```bash
 pip install z3-solver
 python3 prompt2bin.py "I want a fast game frame allocator, 64KB, nothing fancy"
+```
+
+Project build (multiple components from `.prompt` files):
+
+```bash
+python3 prompt2bin.py build sample_project/
 ```
 
 Interactive mode:
@@ -36,40 +66,75 @@ Interactive mode:
 python3 prompt2bin.py --interactive
 ```
 
+## Project builds
+
+A project is a directory with a `build.toml` and `.prompt` files:
+
+```
+my_project/
+├── build.toml
+├── specs/
+│   ├── allocator.prompt    # "I need a fast arena allocator with 4KB pages..."
+│   └── event_queue.prompt  # "Lock-free SPSC ring buffer for 64-byte events..."
+└── build/                  # generated: .h .s .o for each component
+```
+
+```toml
+[project]
+name = "game_engine"
+target = "x86-64-linux"
+
+[components.frame_alloc]
+prompt = "specs/allocator.prompt"
+
+[components.event_queue]
+prompt = "specs/event_queue.prompt"
+```
+
+`prompt2bin build` reads each `.prompt` file, runs the full pipeline, and outputs all artifacts to `build/`.
+
+## Domains
+
+### Arena allocators
+Memory arenas with bump allocation, configurable page sizes, alignment, threading models, and growth policies. Z3 proves overflow safety, alignment correctness, and memory bounds.
+
+### Ring buffers
+Lock-free SPSC/MPSC/MPMC ring buffers with bitmask indexing. Z3 proves capacity invariants, index bounds, data loss prevention, and empty/full state distinction.
+
+Adding a new domain requires: a spec format, Z3 verification properties, and an intent translator. The LLM codegen and test harness handle the rest.
+
 ## Examples
 
-See [`examples/`](examples/) for generated outputs. Three demos:
+See [`examples/`](examples/) for generated outputs including C code, assembly, and terminal transcripts.
 
-**1. Game frame allocator** — vague intent, Claude infers 64KB page, bump strategy, generation tracking:
+**Game frame allocator** — vague intent, Claude infers 64KB page, bump strategy:
 ```
-"I want a fast game frame allocator for temporary per-frame scratch memory, maybe 64KB, nothing fancy"
-→ game_frame.h (86 lines, 7/7 properties verified)
-```
-
-**2. Crypto-secure buffer** — security-focused, Claude enables zeroing and wipe-on-reset:
-```
-"I need something to handle crypto key material in memory — it absolutely must be wiped when we're done, no traces left, small buffer is fine, like 512 bytes"
-→ crypto_secure.h (89 lines, 7/7 properties verified)
+"I want a fast game frame allocator for temporary per-frame scratch memory, maybe 64KB"
+→ 7/7 properties verified → game_frame.h + .s + .o
 ```
 
-**3. Lock-free concurrent arena** — explicit spec, 1MB total across 256 pages:
+**Crypto-secure buffer** — security-focused, zeroing and wipe-on-reset:
 ```
-"Lock-free concurrent arena, 1MB total, 4KB pages, 64-byte alignment, max allocation of 256 bytes"
-→ concurrent.h (84 lines, 7/7 properties verified, 12 allocations proven safe)
+"Handle crypto key material in memory — must be wiped when done, no traces left"
+→ 7/7 properties verified → crypto_secure.h + .s + .o
 ```
 
-**4. Bad spec rejected** — Z3 catches non-power-of-two alignment with counterexample:
+**SPSC audio ring buffer** — lock-free, 4096 float samples:
+```
+"Lock-free SPSC ring buffer for audio processing, 4096 float samples"
+→ 7/7 properties verified → audio_ringbuf.h + .s + .o
+```
+
+**Bad spec rejected** — Z3 catches non-power-of-two alignment:
 ```
 page_size=100, min_align=3
-→ [FAIL] power_of_two: Not power of two: page_size, min_align
-→ [FAIL] aligned_allocs: Allocation can return unaligned pointer
-         Counterexample: base=1, offset=1
+→ [FAIL] power_of_two → [FAIL] aligned_allocs (counterexample: base=1, offset=1)
 → Code generation blocked.
 ```
 
 ## Verified properties
 
-Z3 proves these before any code is generated:
+### Arena allocators
 
 | Property | What it proves |
 |----------|---------------|
@@ -81,18 +146,38 @@ Z3 proves these before any code is generated:
 | `bounded_memory` | Total memory usage never exceeds declared bound |
 | `alloc_sequence` | N allocations fit safely within arena bounds |
 
+### Ring buffers
+
+| Property | What it proves |
+|----------|---------------|
+| `capacity_power_of_two` | Capacity is a power of two (enables bitmask indexing) |
+| `element_size` | Element size is valid and non-zero |
+| `index_bounds` | Bitmask indexing always produces valid index |
+| `no_overflow` | Head/tail arithmetic safe with 64-bit wraparound |
+| `no_data_loss` | Full buffer always detected before overwrite |
+| `bounded_memory` | Total memory bounded at declared limit |
+| `empty_full_distinct` | Empty and full states are distinguishable |
+
 ## Architecture
 
 | File | Role |
 |------|------|
-| `spec.py` | Formal spec format — structured contract between intent and code |
-| `intent.py` | Intent translator — Claude CLI with regex fallback |
-| `verify.py` | Z3 verification — proves safety properties on the spec |
-| `codegen.py` | C code generator — produces header-only library from verified spec |
-| `prompt2bin.py` | Pipeline orchestrator |
+| `prompt2bin.py` | Pipeline orchestrator + project build system |
+| `project.py` | TOML project loader (`build.toml` → component configs) |
+| `spec.py` | Formal spec formats (ArenaSpec, RingBufferSpec) |
+| `intent.py` | Arena intent translator (Claude CLI + regex fallback) |
+| `intent_ringbuf.py` | Ring buffer intent translator |
+| `verify.py` | Z3 verification for arena specs |
+| `verify_ringbuf.py` | Z3 verification for ring buffer specs |
+| `codegen.py` | Template-based C generator (arena fallback) |
+| `codegen_llm.py` | LLM-powered C generator (arena) |
+| `codegen_ringbuf_llm.py` | LLM-powered C generator (ring buffer) |
+| `test_harness.py` | Runtime test harness (arena) |
+| `test_ringbuf.py` | Runtime test harness (ring buffer) |
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+
 - `z3-solver` (`pip install z3-solver`)
-- Claude CLI (optional, for AI translation — falls back to regex without it)
+- GCC (for assembly/binary compilation)
+- Claude CLI (for AI translation and codegen — regex fallback available for intent parsing)

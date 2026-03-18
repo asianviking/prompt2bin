@@ -100,3 +100,39 @@ def ensure_build_dir(project: ProjectConfig) -> Path:
     build_dir = project.build_dir
     build_dir.mkdir(exist_ok=True)
     return build_dir
+
+
+def init_project(project_dir: str | Path) -> Path:
+    """
+    Scaffold a new prompt2bin project.
+
+    Creates:
+        project_dir/
+        ├── build.toml
+        └── specs/
+            └── example.prompt
+    """
+    project_dir = Path(project_dir)
+
+    if (project_dir / "build.toml").exists():
+        raise FileExistsError(f"build.toml already exists in {project_dir}")
+
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "specs").mkdir(exist_ok=True)
+
+    name = project_dir.resolve().name
+
+    (project_dir / "build.toml").write_text(f"""\
+[project]
+name = "{name}"
+target = "x86-64-linux"
+
+[components.example]
+prompt = "specs/example.prompt"
+""")
+
+    (project_dir / "specs" / "example.prompt").write_text(
+        "I need a simple arena allocator with 4KB pages and 16-byte alignment.\n"
+    )
+
+    return project_dir.resolve()

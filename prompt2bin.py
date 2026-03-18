@@ -38,7 +38,7 @@ from codegen_ringbuf_llm import generate_ringbuf_llm
 from test_ringbuf import run_ringbuf_test
 
 # Project system
-from project import load_project, ensure_build_dir
+from project import load_project, ensure_build_dir, init_project
 
 
 BANNER = """
@@ -388,6 +388,21 @@ def interactive():
 def main():
     if len(sys.argv) < 2 or sys.argv[1] == "--interactive":
         interactive()
+    elif sys.argv[1] == "init":
+        if len(sys.argv) < 3:
+            print("Usage: prompt2bin init <project_name>")
+            sys.exit(1)
+        try:
+            path = init_project(sys.argv[2])
+            print(f"\n  ✓ Created project at {path}/")
+            print(f"")
+            print(f"    1. Edit specs/example.prompt (or add more .prompt files)")
+            print(f"    2. Update build.toml with your components")
+            print(f"    3. Run: python3 prompt2bin.py build {sys.argv[2]}")
+            print()
+        except FileExistsError as e:
+            print(f"\n  ✗ {e}")
+            sys.exit(1)
     elif sys.argv[1] == "build":
         project_dir = sys.argv[2] if len(sys.argv) > 2 else "."
         success = build_project(project_dir)
