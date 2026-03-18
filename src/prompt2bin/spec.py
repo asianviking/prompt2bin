@@ -8,6 +8,9 @@ An AI generates these specs; a human never writes them directly.
 Domains:
   - Arena allocator (ArenaSpec)
   - Ring buffer / SPSC queue (RingBufferSpec)
+  - Process spawner (ProcessSpawnerSpec)
+  - String table (StringTableSpec)
+  - Terminal I/O (TermIOSpec)
 """
 
 from dataclasses import dataclass, field
@@ -186,6 +189,179 @@ class RingBufferSpec:
                     "bounded_memory": self.bounded_memory,
                     "no_data_loss": self.no_data_loss,
                     "no_torn_reads": self.no_torn_reads,
+                }.items() if v
+            ),
+        ]
+        return "\n".join(lines)
+
+
+# ── Process Spawner Domain ──
+
+
+class CaptureMode(Enum):
+    NONE = "none"           # Discard output
+    BUFFER = "buffer"       # Capture to fixed buffer
+    PIPE = "pipe"           # Stream via pipe fd
+
+
+@dataclass
+class ProcessSpawnerSpec:
+    """
+    Formal specification for a process spawner (fork/exec wrapper).
+
+    Launches child processes with captured stdout/stderr,
+    configurable timeout, and pipe-based stdin feeding.
+    """
+    name: str = "proc"
+
+    max_args: int = 64              # Maximum argument count
+    max_env: int = 64               # Maximum environment variables
+    max_arg_len: int = 4096         # Max length of a single argument string
+    capture_stdout: CaptureMode = CaptureMode.BUFFER
+    capture_stderr: CaptureMode = CaptureMode.BUFFER
+    stdout_buf_size: int = 65536    # 64KB stdout capture buffer
+    stderr_buf_size: int = 65536    # 64KB stderr capture buffer
+    timeout_ms: int = 30000         # 30s default timeout
+    pipe_stdin: bool = True         # Allow writing to child's stdin
+
+    # Safety
+    bounded_memory: bool = True
+    no_zombie: bool = True          # Always reap child processes
+    timeout_enforced: bool = True   # Kill child after timeout
+
+    @property
+    def total_buffer_bytes(self) -> int:
+        stdout = self.stdout_buf_size if self.capture_stdout == CaptureMode.BUFFER else 0
+        stderr = self.stderr_buf_size if self.capture_stderr == CaptureMode.BUFFER else 0
+        return stdout + stderr
+
+    def describe(self) -> str:
+        lines = [
+            f"Process Spawner Spec: {self.name}",
+            f"  Max args: {self.max_args} (max {self.max_arg_len} bytes each)",
+            f"  Max env vars: {self.max_env}",
+            f"  Stdout capture: {self.capture_stdout.value} ({self.stdout_buf_size} bytes)",
+            f"  Stderr capture: {self.capture_stderr.value} ({self.stderr_buf_size} bytes)",
+            f"  Timeout: {self.timeout_ms}ms",
+            f"  Pipe stdin: {self.pipe_stdin}",
+            f"  Safety: " + ", ".join(
+                k for k, v in {
+                    "bounded_memory": self.bounded_memory,
+                    "no_zombie": self.no_zombie,
+                    "timeout_enforced": self.timeout_enforced,
+                }.items() if v
+            ),
+        ]
+        return "\n".join(lines)
+
+
+# ── String Table Domain ──
+
+
+class HashFunction(Enum):
+    FNV1A = "fnv1a"         # FNV-1a (fast, good distribution)
+    DJBX33A = "djbx33a"     # DJB x33a (simple, fast)
+
+
+@dataclass
+class StringTableSpec:
+    """
+    Formal specification for an interned string table.
+
+    Hash table storing unique strings with deduplication.
+    intern() returns an ID; lookup() returns the string.
+    """
+    name: str = "strtab"
+
+    max_strings: int = 1024         # Max unique strings
+    max_total_bytes: int = 65536    # Total string storage (64KB)
+    max_string_len: int = 4096      # Max single string length
+    hash_bits: int = 10             # Hash table size = 2^hash_bits
+    hash_func: HashFunction = HashFunction.FNV1A
+
+    # Safety
+    bounded_memory: bool = True
+    no_duplicate_storage: bool = True   # Same string always returns same ID
+    null_terminated: bool = True        # All stored strings are null-terminated
+
+    @property
+    def hash_table_size(self) -> int:
+        return 1 << self.hash_bits
+
+    @property
+    def total_memory_bytes(self) -> int:
+        # Hash table + string storage + entry metadata
+        return (self.hash_table_size * 8) + self.max_total_bytes + (self.max_strings * 16)
+
+    def describe(self) -> str:
+        lines = [
+            f"String Table Spec: {self.name}",
+            f"  Max strings: {self.max_strings}",
+            f"  Max total storage: {self.max_total_bytes} bytes",
+            f"  Max string length: {self.max_string_len} bytes",
+            f"  Hash: {self.hash_func.value}, {self.hash_bits} bits ({self.hash_table_size} buckets)",
+            f"  Total memory: ~{self.total_memory_bytes} bytes",
+            f"  Safety: " + ", ".join(
+                k for k, v in {
+                    "bounded_memory": self.bounded_memory,
+                    "no_duplicate_storage": self.no_duplicate_storage,
+                    "null_terminated": self.null_terminated,
+                }.items() if v
+            ),
+        ]
+        return "\n".join(lines)
+
+
+# ── Terminal I/O Domain ──
+
+
+class EditMode(Enum):
+    BASIC = "basic"         # Simple line input (fgets-style)
+    READLINE = "readline"   # Line editing with cursor movement
+
+
+@dataclass
+class TermIOSpec:
+    """
+    Formal specification for a terminal I/O line editor.
+
+    Provides line input with history, prompt display,
+    and basic command parsing.
+    """
+    name: str = "termio"
+
+    max_line_len: int = 4096        # Max input line length
+    history_size: int = 256         # Number of history entries
+    prompt_max_len: int = 256       # Max prompt string length
+    edit_mode: EditMode = EditMode.BASIC
+
+    # Safety
+    bounded_memory: bool = True
+    no_buffer_overflow: bool = True     # Input never exceeds line buffer
+    null_terminated: bool = True        # All lines null-terminated
+
+    @property
+    def history_memory_bytes(self) -> int:
+        return self.history_size * self.max_line_len
+
+    @property
+    def total_memory_bytes(self) -> int:
+        return self.history_memory_bytes + self.max_line_len + self.prompt_max_len + 64
+
+    def describe(self) -> str:
+        lines = [
+            f"Terminal I/O Spec: {self.name}",
+            f"  Max line length: {self.max_line_len} bytes",
+            f"  History: {self.history_size} entries",
+            f"  Prompt max: {self.prompt_max_len} bytes",
+            f"  Edit mode: {self.edit_mode.value}",
+            f"  History memory: {self.history_memory_bytes} bytes",
+            f"  Total memory: ~{self.total_memory_bytes} bytes",
+            f"  Safety: " + ", ".join(
+                k for k, v in {
+                    "bounded_memory": self.bounded_memory,
+                    "no_buffer_overflow": self.no_buffer_overflow,
+                    "null_terminated": self.null_terminated,
                 }.items() if v
             ),
         ]

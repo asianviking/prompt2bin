@@ -1,0 +1,1 @@
+I need a process spawner for launching curl to call the xAI Grok API. Capture stdout to a 512KB buffer for large JSON responses, capture stderr to 16KB buffer for curl diagnostics, pipe stdin for sending JSON request bodies, 120 second timeout for long AI responses.

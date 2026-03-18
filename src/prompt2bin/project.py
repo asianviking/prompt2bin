@@ -167,6 +167,31 @@ TEMPLATES = {
             ),
         },
     },
+    "grok-cli": {
+        "description": "Grok CLI — xAI API via curl, context store, terminal I/O, response buffer",
+        "components": {
+            "api_caller": (
+                "I need a process spawner for launching curl to call the xAI Grok API. "
+                "Capture stdout to a 512KB buffer for large JSON responses, "
+                "capture stderr to 16KB buffer for curl diagnostics, "
+                "pipe stdin for sending JSON request bodies, 120 second timeout for long AI responses."
+            ),
+            "context_store": (
+                "I need a string table for storing conversation context — user prompts, "
+                "Grok responses, and system messages. Up to 512 strings, 256KB total storage, "
+                "max 8192 bytes per string for long AI responses. FNV-1a hash."
+            ),
+            "input_handler": (
+                "I need a terminal input handler for an interactive Grok CLI. "
+                "Basic line input, 4096 byte max line length, 512 history entries "
+                "for recalling previous prompts."
+            ),
+            "response_buffer": (
+                "I need a ring buffer for buffering Grok API response chunks. "
+                "Each chunk is 256 bytes, 1024 slots, SPSC, no data loss."
+            ),
+        },
+    },
 }
 
 

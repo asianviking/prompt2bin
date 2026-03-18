@@ -1,0 +1,15 @@
+[project]
+name = "sample_grok_cli"
+target = "x86-64-linux"
+
+[components.api_caller]
+prompt = "specs/api_caller.prompt"
+
+[components.context_store]
+prompt = "specs/context_store.prompt"
+
+[components.input_handler]
+prompt = "specs/input_handler.prompt"
+
+[components.response_buffer]
+prompt = "specs/response_buffer.prompt"

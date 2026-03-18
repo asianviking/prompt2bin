@@ -1,0 +1,1 @@
+I need a string table for storing conversation context — user prompts, Grok responses, and system messages. Up to 512 strings, 256KB total storage, max 8192 bytes per string for long AI responses. FNV-1a hash.
