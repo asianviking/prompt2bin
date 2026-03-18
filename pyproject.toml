@@ -22,9 +22,6 @@ dependencies = [
     "z3-solver",
 ]
 
-[project.optional-dependencies]
-openai = ["openai>=1.0"]
-
 [project.scripts]
 prompt2bin = "prompt2bin.cli:main"
 p2b = "prompt2bin.cli:main"

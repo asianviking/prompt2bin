@@ -51,12 +51,12 @@ Every stage is a quality gate. Z3 blocks code generation if any safety property 
 pip install prompt2bin
 ```
 
-Requires GCC and at least one LLM backend:
+Requires GCC and at least one LLM backend (no API keys needed — both use your existing subscription):
 
-- **Claude CLI** (default): Install [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) — no API key needed
-- **OpenAI**: `pip install prompt2bin[openai]` and set `OPENAI_API_KEY`
+- **Claude CLI** (default): [Install Claude CLI](https://docs.anthropic.com/en/docs/claude-cli)
+- **Codex CLI**: [Install Codex CLI](https://github.com/openai/codex)
 
-Set `P2B_BACKEND=openai` to force OpenAI, or let it auto-detect.
+Set `P2B_BACKEND=codex` to force Codex, or let it auto-detect.
 
 ## Usage
 
@@ -185,6 +185,6 @@ All source lives in `src/prompt2bin/`:
 
 - Python 3.11+
 - GCC
-- LLM backend (at least one):
+- LLM backend (at least one, no API keys needed):
   - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) (default, auto-detected)
-  - [OpenAI API](https://platform.openai.com/docs/quickstart) (`pip install openai`, set `OPENAI_API_KEY`)
+  - [Codex CLI](https://github.com/openai/codex)

@@ -390,12 +390,12 @@ def check_dependencies():
 
     backend = llm.get_backend()
     has_claude = shutil.which("claude")
-    has_openai = os.environ.get("OPENAI_API_KEY")
+    has_codex = shutil.which("codex")
 
-    if not has_claude and not has_openai:
+    if not has_claude and not has_codex:
         print("\n  ⚠ No LLM backend found. Will fall back to regex parsing (less accurate).")
         print("    Option 1: Install Claude CLI — https://docs.anthropic.com/en/docs/claude-cli")
-        print("    Option 2: Set OPENAI_API_KEY env var — pip install openai")
+        print("    Option 2: Install Codex CLI — https://github.com/openai/codex")
         print()
     else:
         print(f"  LLM backend: {backend}")
@@ -417,12 +417,10 @@ def show_help(cmd: str):
 
   LLM backends (auto-detected, or set P2B_BACKEND):
     claude    Claude CLI (default if installed)
-    openai    OpenAI API (set OPENAI_API_KEY, pip install openai)
+    codex     OpenAI Codex CLI
 
   Environment variables:
-    P2B_BACKEND        Force backend: "claude" or "openai"
-    P2B_OPENAI_MODEL   OpenAI model (default: gpt-4o-mini)
-    OPENAI_API_KEY     Required for OpenAI backend
+    P2B_BACKEND        Force backend: "claude" or "codex"
 
   Examples:
     {cmd} init my_game --template game-engine
