@@ -391,11 +391,14 @@ def check_dependencies():
     backend = llm.get_backend()
     has_claude = shutil.which("claude")
     has_codex = shutil.which("codex")
+    has_anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    has_openai_key = os.environ.get("OPENAI_API_KEY")
 
-    if not has_claude and not has_codex:
+    if not has_claude and not has_codex and not has_anthropic_key and not has_openai_key:
         print("\n  ⚠ No LLM backend found. Will fall back to regex parsing (less accurate).")
         print("    Option 1: Install Claude CLI — https://docs.anthropic.com/en/docs/claude-cli")
         print("    Option 2: Install Codex CLI — https://github.com/openai/codex")
+        print("    Option 3: Set ANTHROPIC_API_KEY or OPENAI_API_KEY")
         print()
     else:
         print(f"  LLM backend: {backend}")
@@ -416,11 +419,19 @@ def show_help(cmd: str):
   Templates: {', '.join(TEMPLATES)}
 
   LLM backends (auto-detected, or set P2B_BACKEND):
-    claude    Claude CLI (default if installed)
-    codex     OpenAI Codex CLI
+    claude          Claude CLI (default if installed)
+    codex           OpenAI Codex CLI
+    anthropic-api   Anthropic API (needs ANTHROPIC_API_KEY)
+    openai-api      OpenAI API (needs OPENAI_API_KEY)
+
+  Priority: CLI > API key. Set P2B_BACKEND to override.
 
   Environment variables:
-    P2B_BACKEND        Force backend: "claude" or "codex"
+    P2B_BACKEND          Force backend (see above)
+    ANTHROPIC_API_KEY    For anthropic-api backend
+    OPENAI_API_KEY       For openai-api backend
+    P2B_ANTHROPIC_MODEL  Anthropic model (default: claude-haiku-4-5-20251001)
+    P2B_OPENAI_MODEL     OpenAI model (default: gpt-4o-mini)
 
   Examples:
     {cmd} init my_game --template game-engine

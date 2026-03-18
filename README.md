@@ -51,12 +51,16 @@ Every stage is a quality gate. Z3 blocks code generation if any safety property 
 pip install prompt2bin
 ```
 
-Requires GCC and at least one LLM backend (no API keys needed — both use your existing subscription):
+Requires GCC and at least one LLM backend:
 
-- **Claude CLI** (default): [Install Claude CLI](https://docs.anthropic.com/en/docs/claude-cli)
-- **Codex CLI**: [Install Codex CLI](https://github.com/openai/codex)
+| Backend | Setup | API key? |
+|---------|-------|----------|
+| **Claude CLI** (default) | [Install Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) | No — uses subscription |
+| **Codex CLI** | [Install Codex CLI](https://github.com/openai/codex) | No — uses subscription |
+| **Anthropic API** | `pip install prompt2bin[anthropic]` + set `ANTHROPIC_API_KEY` | Yes |
+| **OpenAI API** | `pip install prompt2bin[openai]` + set `OPENAI_API_KEY` | Yes |
 
-Set `P2B_BACKEND=codex` to force Codex, or let it auto-detect.
+Auto-detects in priority order: CLI > API key. Set `P2B_BACKEND` to override.
 
 ## Usage
 
@@ -168,7 +172,7 @@ All source lives in `src/prompt2bin/`:
 | Module | Role |
 |--------|------|
 | `cli.py` | Pipeline orchestrator + project build system |
-| `llm.py` | LLM backend abstraction (Claude CLI / OpenAI API) |
+| `llm.py` | LLM backend abstraction (Claude CLI / Codex CLI / Anthropic API / OpenAI API) |
 | `project.py` | TOML project loader (`build.toml` → component configs) |
 | `spec.py` | Formal spec formats (ArenaSpec, RingBufferSpec) |
 | `intent.py` | Arena intent translator (Claude CLI + regex fallback) |
@@ -185,6 +189,6 @@ All source lives in `src/prompt2bin/`:
 
 - Python 3.11+
 - GCC
-- LLM backend (at least one, no API keys needed):
-  - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) (default, auto-detected)
-  - [Codex CLI](https://github.com/openai/codex)
+- LLM backend (at least one):
+  - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) or [Codex CLI](https://github.com/openai/codex) (no API key needed)
+  - Or set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (install SDK: `pip install prompt2bin[anthropic]` or `pip install prompt2bin[openai]`)

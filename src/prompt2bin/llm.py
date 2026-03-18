@@ -1,11 +1,12 @@
 """
 LLM backend abstraction.
 
-Supports Claude CLI and Codex CLI. The backend is selected by:
-  1. P2B_BACKEND env var ("claude" or "codex")
-  2. Auto-detection: tries Claude CLI first, then Codex CLI
-
-Both are subscription-based CLIs — no API keys needed.
+Supports Claude CLI, Codex CLI, and their respective APIs.
+Backend priority (auto-detected, or override with P2B_BACKEND):
+  1. Claude CLI   (subscription, no API key)
+  2. Codex CLI    (subscription, no API key)
+  3. Anthropic API (ANTHROPIC_API_KEY)
+  4. OpenAI API    (OPENAI_API_KEY)
 
 Two operations:
   - structured(): prompt + system prompt + JSON schema → parsed dict
@@ -18,18 +19,26 @@ import shutil
 import subprocess
 import tempfile
 
+BACKENDS = ("claude", "codex", "anthropic-api", "openai-api")
+
 
 def _detect_backend() -> str:
     """Detect which LLM backend to use."""
     env = os.environ.get("P2B_BACKEND", "").lower()
-    if env in ("claude", "codex"):
+    if env in BACKENDS:
         return env
 
+    # CLIs first (no API key friction)
     if shutil.which("claude"):
         return "claude"
-
     if shutil.which("codex"):
         return "codex"
+
+    # API keys as fallback
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic-api"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai-api"
 
     return "claude"  # will fail with a helpful message later
 
@@ -133,7 +142,6 @@ def _codex_structured(prompt: str, system_prompt: str, json_schema: str, timeout
     if not codex_bin:
         return None
 
-    # Embed the schema in the prompt so Codex knows the expected format
     full_prompt = (
         f"{prompt}\n\n"
         f"Respond with ONLY valid JSON matching this schema:\n{json_schema}"
@@ -164,7 +172,6 @@ def _codex_structured(prompt: str, system_prompt: str, json_schema: str, timeout
     for line in result.stdout.strip().split("\n"):
         try:
             event = json.loads(line)
-            # Look for the final message content
             if event.get("type") == "item.completed":
                 item = event.get("item", {})
                 if item.get("type") == "message" and item.get("role") == "assistant":
@@ -175,13 +182,11 @@ def _codex_structured(prompt: str, system_prompt: str, json_schema: str, timeout
             continue
 
     if not last_message:
-        # Fallback: try parsing stdout directly (non-json mode output)
         last_message = result.stdout.strip()
 
     try:
         return json.loads(last_message)
     except json.JSONDecodeError:
-        # Try to extract JSON from the message
         for line in last_message.split("\n"):
             line = line.strip()
             if line.startswith("{"):
@@ -220,7 +225,147 @@ def _codex_generate(prompt: str, system_prompt: str, timeout: int = 90) -> str |
     return result.stdout
 
 
+# ── Anthropic API backend ──
+
+def _get_anthropic_client():
+    """Get Anthropic client, importing lazily."""
+    try:
+        import anthropic
+        return anthropic.Anthropic()
+    except ImportError:
+        print("  ✗ anthropic package not installed. Run: pip install anthropic")
+        return None
+
+
+def _anthropic_api_structured(prompt: str, system_prompt: str, json_schema: str, timeout: int = 60) -> dict | None:
+    """Call Anthropic API with tool_use for structured output."""
+    client = _get_anthropic_client()
+    if not client:
+        return None
+
+    schema = json.loads(json_schema)
+    model = os.environ.get("P2B_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+
+    try:
+        response = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            system=system_prompt,
+            tools=[{
+                "name": "spec",
+                "description": "Output the structured spec",
+                "input_schema": schema,
+            }],
+            tool_choice={"type": "tool", "name": "spec"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        for block in response.content:
+            if block.type == "tool_use" and block.name == "spec":
+                return block.input
+    except Exception as e:
+        print(f"  ⚠ Anthropic API failed: {e}")
+
+    return None
+
+
+def _anthropic_api_generate(prompt: str, system_prompt: str, timeout: int = 90) -> str | None:
+    """Call Anthropic API for raw text generation."""
+    client = _get_anthropic_client()
+    if not client:
+        return None
+
+    model = os.environ.get("P2B_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+
+    try:
+        response = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text
+    except Exception as e:
+        print(f"  ⚠ Anthropic API failed: {e}")
+        return None
+
+
+# ── OpenAI API backend ──
+
+def _get_openai_client():
+    """Get OpenAI client, importing lazily."""
+    try:
+        import openai
+        return openai.OpenAI()
+    except ImportError:
+        print("  ✗ openai package not installed. Run: pip install openai")
+        return None
+
+
+def _openai_api_structured(prompt: str, system_prompt: str, json_schema: str, timeout: int = 60) -> dict | None:
+    """Call OpenAI API with structured output (response_format)."""
+    client = _get_openai_client()
+    if not client:
+        return None
+
+    schema = json.loads(json_schema)
+    model = os.environ.get("P2B_OPENAI_MODEL", "gpt-4o-mini")
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "spec",
+                    "strict": True,
+                    "schema": schema,
+                },
+            },
+            timeout=timeout,
+        )
+        content = response.choices[0].message.content
+        return json.loads(content)
+    except Exception as e:
+        print(f"  ⚠ OpenAI API failed: {e}")
+        return None
+
+
+def _openai_api_generate(prompt: str, system_prompt: str, timeout: int = 90) -> str | None:
+    """Call OpenAI API for raw text generation."""
+    client = _get_openai_client()
+    if not client:
+        return None
+
+    model = os.environ.get("P2B_OPENAI_MODEL", "gpt-4o-mini")
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            timeout=timeout,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"  ⚠ OpenAI API failed: {e}")
+        return None
+
+
 # ── Public API ──
+
+_DISPATCH = {
+    "claude":        (_claude_structured,        _claude_generate),
+    "codex":         (_codex_structured,         _codex_generate),
+    "anthropic-api": (_anthropic_api_structured, _anthropic_api_generate),
+    "openai-api":    (_openai_api_structured,    _openai_api_generate),
+}
+
 
 def structured(prompt: str, system_prompt: str, json_schema: str, timeout: int = 60) -> dict | None:
     """
@@ -229,9 +374,8 @@ def structured(prompt: str, system_prompt: str, json_schema: str, timeout: int =
     Returns a parsed dict matching the schema, or None on failure.
     """
     backend = _detect_backend()
-    if backend == "codex":
-        return _codex_structured(prompt, system_prompt, json_schema, timeout)
-    return _claude_structured(prompt, system_prompt, json_schema, timeout)
+    fn = _DISPATCH[backend][0]
+    return fn(prompt, system_prompt, json_schema, timeout)
 
 
 def generate(prompt: str, system_prompt: str, timeout: int = 90) -> str | None:
@@ -241,6 +385,5 @@ def generate(prompt: str, system_prompt: str, timeout: int = 90) -> str | None:
     Returns the generated text, or None on failure.
     """
     backend = _detect_backend()
-    if backend == "codex":
-        return _codex_generate(prompt, system_prompt, timeout)
-    return _claude_generate(prompt, system_prompt, timeout)
+    fn = _DISPATCH[backend][1]
+    return fn(prompt, system_prompt, timeout)
