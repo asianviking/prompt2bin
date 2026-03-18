@@ -138,7 +138,7 @@ def _call_claude(prompt: str, attempt: int = 1) -> str | None:
                 claude_bin, "-p",
                 "--system-prompt", SYSTEM_PROMPT,
                 "--tools", "",
-                "--model", "sonnet",
+                "--model", "haiku",
                 prompt,
             ],
             capture_output=True,

@@ -1,0 +1,73 @@
+
+────────────────────────────────────────────────────────────
+  INPUT: SPSC ring buffer for audio samples, 4096 float elements, low latency
+────────────────────────────────────────────────────────────
+
+  Domain: ringbuf
+
+▸ Phase 1: Translating intent → formal spec...
+  (translated by Claude via CLI)
+Ring Buffer Spec: audio_ringbuf
+  Mode: spsc
+  Element: 4 bytes x 4096 slots
+  Buffer size: 16384 bytes
+  Total memory: 16512 bytes
+  Index mask: 0xFFF
+  Cache line padding: True
+  Blocking: False
+  Safety: bounded_memory, no_data_loss, no_torn_reads
+
+▸ Phase 2: Verifying spec with Z3...
+  [PASS] capacity_power_of_two: Capacity 4096 is a power of two (mask=0xFFF)
+  [PASS] element_size: Element size 4 bytes is valid
+  [PASS] index_bounds: Bitmask indexing always produces valid index (index & mask < capacity)
+  [PASS] no_overflow: Head/tail arithmetic safe with unsigned 64-bit wraparound
+  [PASS] no_data_loss: Full buffer always detected by (head - tail >= capacity) check
+  [PASS] bounded_memory: Total memory bounded at 16512 bytes (4096 x 4B elements + overhead)
+  [PASS] empty_full_distinct: Empty and full states are always distinguishable
+
+  All 7 properties verified ✓
+
+▸ Phase 3: Generating C code via LLM...
+  GCC rejected attempt 1, retrying...
+  Generated 70 lines → audio_ringbuf.h (via Claude)
+
+▸ Phase 3b: Running test harness...
+  PASS: all ring buffer tests passed
+
+▸ Phase 4: Compiling to assembly and machine code...
+  audio_ringbuf.s      —  1,617 bytes (human-readable assembly)
+  audio_ringbuf.o      —  1,848 bytes (machine code)
+
+  audio_ringbuf_push assembly (18 instructions):
+
+    _force_push:
+    	endbr64
+    	mov	rax, QWORD PTR [rdi]
+    	mov	rcx, QWORD PTR 64[rdi]
+    	mov	rdx, rax
+    	sub	rdx, rcx
+    	cmp	rdx, 4095
+    	ja	.L10
+    	mov	ecx, DWORD PTR [rsi]
+    	mov	rdx, rax
+    	add	rax, 1
+    	and	edx, 4095
+    	mov	DWORD PTR 128[rdi+rdx*4], ecx
+    	mov	QWORD PTR [rdi], rax
+    	xor	eax, eax
+    	ret
+    	mov	eax, -1
+    	ret
+
+════════════════════════════════════════════════════════════
+  ✓ Complete pipeline: English → verified machine code
+
+    audio_ringbuf.h       C code (70 lines)
+    audio_ringbuf.s       x86-64 assembly
+    audio_ringbuf.o       machine code (linkable)
+
+    Link into your program:
+      #include "audio_ringbuf.h"
+════════════════════════════════════════════════════════════
+
