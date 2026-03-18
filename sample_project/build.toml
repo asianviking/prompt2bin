@@ -1,10 +1,9 @@
 [project]
-name = "game_engine"
+name = "sample_project"
 target = "x86-64-linux"
 
-[components.frame_alloc]
-prompt = "specs/allocator.prompt"
+[components.memory_pool]
+prompt = "specs/memory_pool.prompt"
 
-[components.event_queue]
-prompt = "specs/event_queue.prompt"
-depends_on = []
+[components.message_queue]
+prompt = "specs/message_queue.prompt"

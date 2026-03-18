@@ -87,21 +87,21 @@ A project is a directory with a `build.toml` and `.prompt` files:
 my_project/
 ├── build.toml
 ├── specs/
-│   ├── allocator.prompt    # "I need a fast arena allocator with 4KB pages..."
-│   └── event_queue.prompt  # "Lock-free SPSC ring buffer for 64-byte events..."
-└── build/                  # generated: .h .s .o for each component
+│   ├── memory_pool.prompt    # "I need a memory pool for allocating small objects..."
+│   └── message_queue.prompt  # "I need a queue for passing messages between two threads..."
+└── build/                    # generated: .h .s .o for each component
 ```
 
 ```toml
 [project]
-name = "game_engine"
+name = "my_project"
 target = "x86-64-linux"
 
-[components.frame_alloc]
-prompt = "specs/allocator.prompt"
+[components.memory_pool]
+prompt = "specs/memory_pool.prompt"
 
-[components.event_queue]
-prompt = "specs/event_queue.prompt"
+[components.message_queue]
+prompt = "specs/message_queue.prompt"
 ```
 
 `prompt2bin build` reads each `.prompt` file, runs the full pipeline, and outputs all artifacts to `build/`.

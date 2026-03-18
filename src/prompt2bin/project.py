@@ -103,14 +103,21 @@ def ensure_build_dir(project: ProjectConfig) -> Path:
 
 
 TEMPLATES = {
-    "blank": {
-        "description": "Empty project with one example prompt",
+    "starter": {
+        "description": "A memory pool and a message queue — the simplest demo",
         "components": {
-            "example": "I need a simple arena allocator with 4KB pages and 16-byte alignment.",
+            "memory_pool": (
+                "I need a memory pool for allocating small objects. "
+                "4KB capacity, 16-byte alignment, single-threaded."
+            ),
+            "message_queue": (
+                "I need a queue for passing messages between two threads. "
+                "Each message is 32 bytes, 128 slots, no messages can be lost."
+            ),
         },
     },
     "game-engine": {
-        "description": "Game engine primitives — frame allocator, event queue, object pool",
+        "description": "Game engine — frame allocator, event queue, object pool",
         "components": {
             "frame_alloc": (
                 "I need a fast arena allocator for per-frame scratch memory in a game engine. "
@@ -127,7 +134,7 @@ TEMPLATES = {
         },
     },
     "network-stack": {
-        "description": "Network service primitives — packet buffer, connection pool, async I/O queue",
+        "description": "Network service — packet buffer, connection pool, async I/O queue",
         "components": {
             "packet_buffer": (
                 "I need an arena allocator for network packet assembly. 8KB pages to fit jumbo frames, "
@@ -144,7 +151,7 @@ TEMPLATES = {
         },
     },
     "audio-pipeline": {
-        "description": "Audio/media pipeline — sample buffer, processing scratch, command queue",
+        "description": "Audio/media — sample buffer, processing scratch, command queue",
         "components": {
             "sample_buffer": (
                 "I need a lock-free SPSC ring buffer for streaming audio samples between "
@@ -177,7 +184,7 @@ def _pick_template_interactive() -> str:
             choice = input("  Pick a template [1]: ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
-            return "blank"
+            return "starter"
         if not choice:
             return templates[0][0]
         try:
