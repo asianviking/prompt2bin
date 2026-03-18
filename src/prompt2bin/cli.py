@@ -386,11 +386,12 @@ def interactive():
 
 
 def main():
+    cmd = Path(sys.argv[0]).stem  # "p2b" or "prompt2bin"
     if len(sys.argv) < 2 or sys.argv[1] == "--interactive":
         interactive()
     elif sys.argv[1] == "init":
         if len(sys.argv) < 3:
-            print("Usage: prompt2bin init <project_name> [--template <name>]")
+            print(f"Usage: {cmd} init <project_name> [--template <name>]")
             sys.exit(1)
         project_name = sys.argv[2]
         template = None
@@ -411,7 +412,7 @@ def main():
             print(f"")
             print(f"    Next steps:")
             print(f"      1. Review specs/ and edit prompts to your needs")
-            print(f"      2. prompt2bin build {project_name}")
+            print(f"      2. {cmd} build {project_name}")
             print()
         except (FileExistsError, ValueError) as e:
             print(f"\n  ✗ {e}")

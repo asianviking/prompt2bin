@@ -55,28 +55,13 @@ Requires GCC and [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) for
 
 ## Usage
 
-Single prompt:
+`p2b` is the short alias for `prompt2bin` — both work everywhere.
 
 ```bash
-prompt2bin "I want a fast game frame allocator, 64KB, nothing fancy"
-```
-
-Scaffold a new project:
-
-```bash
-prompt2bin init my_project
-```
-
-Build a project (multiple components from `.prompt` files):
-
-```bash
-prompt2bin build my_project/
-```
-
-Interactive mode:
-
-```bash
-prompt2bin --interactive
+p2b init my_project          # scaffold a new project
+p2b build my_project         # build all components
+p2b "I need a memory pool"   # single prompt, one-shot
+p2b --interactive            # interactive mode
 ```
 
 ## Project builds

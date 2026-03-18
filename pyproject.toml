@@ -24,6 +24,7 @@ dependencies = [
 
 [project.scripts]
 prompt2bin = "prompt2bin.cli:main"
+p2b = "prompt2bin.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/asianviking/prompt2bin"
