@@ -2,19 +2,11 @@
 """
 prompt2bin — from natural language to verified machine code.
 
-Domains:
-    - Arena allocators: "I need a fast arena allocator with 4KB pages"
-    - Ring buffers: "I need a lock-free queue for audio samples"
-
 Usage:
-    # Single prompt
-    python prompt2bin.py "I need an arena allocator with 4KB pages and 16-byte alignment"
-
-    # Project build (reads build.toml)
-    python prompt2bin.py build [project_dir]
-
-    # Interactive
-    python prompt2bin.py --interactive
+    p2b init my_project          # scaffold a new project
+    p2b build my_project         # build all components
+    p2b "I need a memory pool"   # single prompt, one-shot
+    p2b --interactive            # interactive mode
 """
 
 import shutil
@@ -443,6 +435,10 @@ def main():
     cmd = Path(sys.argv[0]).stem  # "p2b" or "prompt2bin"
     if len(sys.argv) > 1 and sys.argv[1] in ("--help", "-h", "help"):
         show_help(cmd)
+        sys.exit(0)
+    if len(sys.argv) > 1 and sys.argv[1] in ("--version", "-V"):
+        from . import __version__
+        print(f"prompt2bin {__version__}")
         sys.exit(0)
     if len(sys.argv) < 2 or sys.argv[1] == "--interactive":
         interactive()
