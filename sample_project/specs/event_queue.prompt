@@ -1,0 +1,1 @@
+I need a lock-free SPSC ring buffer for passing 64-byte event structs between a game's input thread and render thread. Capacity should be 256 slots. No data loss allowed.

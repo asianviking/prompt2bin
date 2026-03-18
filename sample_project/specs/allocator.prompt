@@ -1,0 +1,1 @@
+I need a fast arena allocator with 4KB pages and 16-byte alignment for a game engine frame allocator. It should zero memory on reset for safety.

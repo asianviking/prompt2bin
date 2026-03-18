@@ -7,8 +7,13 @@ Domains:
     - Ring buffers: "I need a lock-free queue for audio samples"
 
 Usage:
+    # Single prompt
     python prompt2bin.py "I need an arena allocator with 4KB pages and 16-byte alignment"
-    python prompt2bin.py "SPSC ring buffer for audio, 4096 float samples"
+
+    # Project build (reads build.toml)
+    python prompt2bin.py build [project_dir]
+
+    # Interactive
     python prompt2bin.py --interactive
 """
 
@@ -17,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import os
+from pathlib import Path
 
 # Arena domain
 from intent import intent_to_spec as intent_to_arena
@@ -30,6 +36,9 @@ from intent_ringbuf import intent_to_ringbuf
 from verify_ringbuf import verify_ringbuf_spec
 from codegen_ringbuf_llm import generate_ringbuf_llm
 from test_ringbuf import run_ringbuf_test
+
+# Project system
+from project import load_project, ensure_build_dir
 
 
 BANNER = """
@@ -60,13 +69,13 @@ def detect_domain(intent: str) -> str:
     return "arena"
 
 
-def compile_to_binary(c_code: str, name: str, domain: str) -> tuple[str | None, str | None, str | None]:
+def compile_to_binary(c_code: str, name: str, domain: str, output_dir: str = ".") -> tuple[str | None, str | None, str | None]:
     """Compile C code to assembly and object file."""
     gcc = shutil.which("gcc")
     if not gcc:
         return None, None, "gcc not found"
 
-    header_path = os.path.abspath(f"{name}.h")
+    header_path = os.path.abspath(os.path.join(output_dir, f"{name}.h"))
 
     if domain == "ringbuf":
         wrapper = f"""\
@@ -76,8 +85,6 @@ int   _force_push(void *rb, const void *d) {{ return {name}_push(({name}_t*)rb, 
 int   _force_pop(void *rb, void *d) {{ return {name}_pop(({name}_t*)rb, d); }}
 void  _force_destroy(void *rb) {{ {name}_destroy(({name}_t*)rb); }}
 """
-        hot_func = "_force_push"
-        hot_label = f"{name}_push"
     else:
         wrapper = f"""\
 #include "{header_path}"
@@ -86,11 +93,9 @@ void *_force_alloc(void *a, unsigned long n) {{ return {name}_alloc(({name}_t*)a
 void  _force_reset(void *a) {{ {name}_reset(({name}_t*)a); }}
 void  _force_destroy(void *a) {{ {name}_destroy(({name}_t*)a); }}
 """
-        hot_func = "_force_alloc"
-        hot_label = f"{name}_alloc"
 
-    asm_path = f"{name}.s"
-    obj_path = f"{name}.o"
+    asm_path = os.path.join(output_dir, f"{name}.s")
+    obj_path = os.path.join(output_dir, f"{name}.o")
 
     with tempfile.NamedTemporaryFile(suffix=".c", mode="w", delete=False) as f:
         f.write(wrapper)
@@ -150,30 +155,29 @@ def show_assembly_highlights(asm_path: str, func_name: str, label: str):
             print(f"    ... ({len(instructions) - 25} more)")
 
 
-def compile_pipeline(intent: str, output_path: str | None = None) -> bool:
+def compile_pipeline(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """Full pipeline: intent → spec → verify → C code → assembly → binary."""
     print(f"\n{'─' * 60}")
     print(f"  INPUT: {intent}")
     print(f"{'─' * 60}")
 
-    # ── Domain detection ──
     domain = detect_domain(intent)
     print(f"\n  Domain: {domain}")
 
     if domain == "ringbuf":
-        return _compile_ringbuf(intent, output_path)
+        return _compile_ringbuf(intent, output_dir, name_override)
     else:
-        return _compile_arena(intent, output_path)
+        return _compile_arena(intent, output_dir, name_override)
 
 
-def _compile_arena(intent: str, output_path: str | None = None) -> bool:
+def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """Arena allocator pipeline."""
-    # Phase 1
     print("\n▸ Phase 1: Translating intent → formal spec...")
     spec = intent_to_arena(intent)
+    if name_override:
+        spec.name = name_override
     print(spec.describe())
 
-    # Phase 2
     print("\n▸ Phase 2: Verifying spec with Z3...")
     results = verify_arena(spec)
     all_passed = True
@@ -190,7 +194,6 @@ def _compile_arena(intent: str, output_path: str | None = None) -> bool:
         return False
     print(f"\n  All {len(results)} properties verified ✓")
 
-    # Phase 3
     verified_props = [r.message for r in results if r.passed]
     print("\n▸ Phase 3: Generating C code via LLM...")
     c_code = generate_arena_llm(spec, verified_properties=verified_props)
@@ -201,14 +204,12 @@ def _compile_arena(intent: str, output_path: str | None = None) -> bool:
         c_code = generate_arena_template(spec)
         codegen_source = "template"
 
-    if output_path is None:
-        output_path = f"{spec.name}.h"
+    output_path = os.path.join(output_dir, f"{spec.name}.h")
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
     print(f"  Generated {lines} lines → {output_path} (via {codegen_source})")
 
-    # Phase 3b
     print("\n▸ Phase 3b: Running test harness...")
     test_ok, test_msg = run_arena_test(spec, output_path)
     print(f"  {test_msg}")
@@ -222,18 +223,18 @@ def _compile_arena(intent: str, output_path: str | None = None) -> bool:
         test_ok, test_msg = run_arena_test(spec, output_path)
         print(f"  {test_msg}")
 
-    # Phase 4
-    return _phase4(c_code, spec.name, output_path, lines, "arena", "_force_alloc", f"{spec.name}_alloc")
+    return _phase4(c_code, spec.name, output_path, lines, "arena",
+                   "_force_alloc", f"{spec.name}_alloc", output_dir)
 
 
-def _compile_ringbuf(intent: str, output_path: str | None = None) -> bool:
+def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """Ring buffer pipeline."""
-    # Phase 1
     print("\n▸ Phase 1: Translating intent → formal spec...")
     spec = intent_to_ringbuf(intent)
+    if name_override:
+        spec.name = name_override
     print(spec.describe())
 
-    # Phase 2
     print("\n▸ Phase 2: Verifying spec with Z3...")
     results = verify_ringbuf_spec(spec)
     all_passed = True
@@ -250,7 +251,6 @@ def _compile_ringbuf(intent: str, output_path: str | None = None) -> bool:
         return False
     print(f"\n  All {len(results)} properties verified ✓")
 
-    # Phase 3 — LLM only (no template fallback for ring buffers)
     verified_props = [r.message for r in results if r.passed]
     print("\n▸ Phase 3: Generating C code via LLM...")
     c_code = generate_ringbuf_llm(spec, verified_properties=verified_props)
@@ -260,52 +260,115 @@ def _compile_ringbuf(intent: str, output_path: str | None = None) -> bool:
         print("  ✗ LLM codegen failed and no template fallback for ring buffers.")
         return False
 
-    if output_path is None:
-        output_path = f"{spec.name}.h"
+    output_path = os.path.join(output_dir, f"{spec.name}.h")
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
     print(f"  Generated {lines} lines → {output_path} (via {codegen_source})")
 
-    # Phase 3b
     print("\n▸ Phase 3b: Running test harness...")
     test_ok, test_msg = run_ringbuf_test(spec, output_path)
     print(f"  {test_msg}")
     if not test_ok:
         print("  ⚠ Tests failed — code generated but may have issues")
 
-    # Phase 4
-    return _phase4(c_code, spec.name, output_path, lines, "ringbuf", "_force_push", f"{spec.name}_push")
+    return _phase4(c_code, spec.name, output_path, lines, "ringbuf",
+                   "_force_push", f"{spec.name}_push", output_dir)
 
 
-def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label):
+def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, output_dir="."):
     """Phase 4: Compile to assembly and machine code."""
     print("\n▸ Phase 4: Compiling to assembly and machine code...")
-    asm_path, obj_path, err = compile_to_binary(c_code, name, domain)
+    asm_path, obj_path, err = compile_to_binary(c_code, name, domain, output_dir)
 
     if err:
         print(f"  ⚠ {err}")
     else:
         asm_size = os.path.getsize(asm_path)
         obj_size = os.path.getsize(obj_path)
-        print(f"  {asm_path:20s} — {asm_size:>6,} bytes (human-readable assembly)")
-        print(f"  {obj_path:20s} — {obj_size:>6,} bytes (machine code)")
+        print(f"  {asm_path:30s} — {asm_size:>6,} bytes (assembly)")
+        print(f"  {obj_path:30s} — {obj_size:>6,} bytes (machine code)")
         show_assembly_highlights(asm_path, hot_func, hot_label)
 
     print(f"\n{'═' * 60}")
     print(f"  ✓ Complete pipeline: English → verified machine code")
     print(f"")
-    print(f"    {output_path:20s}  C code ({lines} lines)")
+    print(f"    {output_path:30s}  C code ({lines} lines)")
     if asm_path:
-        print(f"    {asm_path:20s}  x86-64 assembly")
+        print(f"    {asm_path:30s}  x86-64 assembly")
     if obj_path:
-        print(f"    {obj_path:20s}  machine code (linkable)")
+        print(f"    {obj_path:30s}  machine code (linkable)")
     print(f"")
     print(f"    Link into your program:")
-    print(f"      #include \"{output_path}\"")
+    print(f"      #include \"{os.path.basename(output_path)}\"")
     print(f"{'═' * 60}\n")
     return True
 
+
+# ── Project build system ──
+
+def build_project(project_dir: str = ".") -> bool:
+    """
+    Build all components defined in a project's build.toml.
+
+    Reads each .prompt file, runs the full pipeline, outputs
+    all artifacts to build/.
+    """
+    try:
+        project = load_project(project_dir)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"\n✗ {e}")
+        return False
+
+    build_dir = ensure_build_dir(project)
+
+    print(f"\n{'═' * 60}")
+    print(f"  prompt2bin build: {project.name}")
+    print(f"  Target: {project.target}")
+    print(f"  Components: {len(project.components)}")
+    print(f"  Output: {build_dir}/")
+    print(f"{'═' * 60}")
+
+    results = {}
+    for comp_name, comp in project.components.items():
+        print(f"\n{'━' * 60}")
+        print(f"  Building component: {comp_name}")
+        print(f"  Prompt: {comp.prompt_path}")
+        print(f"{'━' * 60}")
+
+        ok = compile_pipeline(
+            comp.prompt_text,
+            output_dir=str(build_dir),
+            name_override=comp_name,
+        )
+        results[comp_name] = ok
+
+    # ── Build summary ──
+    passed = [k for k, v in results.items() if v]
+    failed = [k for k, v in results.items() if not v]
+
+    print(f"\n{'═' * 60}")
+    print(f"  BUILD {'COMPLETE' if not failed else 'FINISHED WITH ERRORS'}")
+    print(f"")
+
+    if passed:
+        print(f"  ✓ Passed ({len(passed)}):")
+        for name in passed:
+            print(f"      {name}.h  {name}.s  {name}.o")
+    if failed:
+        print(f"  ✗ Failed ({len(failed)}):")
+        for name in failed:
+            print(f"      {name}")
+
+    print(f"")
+    print(f"  Output: {build_dir}/")
+    print(f"  Include: -I{build_dir}")
+    print(f"{'═' * 60}\n")
+
+    return len(failed) == 0
+
+
+# ── CLI ──
 
 def interactive():
     """Interactive mode."""
@@ -325,6 +388,10 @@ def interactive():
 def main():
     if len(sys.argv) < 2 or sys.argv[1] == "--interactive":
         interactive()
+    elif sys.argv[1] == "build":
+        project_dir = sys.argv[2] if len(sys.argv) > 2 else "."
+        success = build_project(project_dir)
+        sys.exit(0 if success else 1)
     else:
         intent = " ".join(sys.argv[1:])
         success = compile_pipeline(intent)

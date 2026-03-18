@@ -1,0 +1,10 @@
+[project]
+name = "game_engine"
+target = "x86-64-linux"
+
+[components.frame_alloc]
+prompt = "specs/allocator.prompt"
+
+[components.event_queue]
+prompt = "specs/event_queue.prompt"
+depends_on = []
