@@ -1020,7 +1020,7 @@ def _generate_grok_cli_main_c(build_dir: Path) -> Path:
         '    }',
         '',
         '    const char *model = getenv("XAI_MODEL");',
-        '    if (!model || !*model) model = "grok-2-latest";',
+        '    if (!model || !*model) model = "grok-4-0709";',
         '',
         '    context_store_t *store = context_store_create();',
         '    input_handler_t *io = input_handler_create();',
