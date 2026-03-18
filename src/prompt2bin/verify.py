@@ -15,7 +15,7 @@ from z3 import (
     ULT, ULE, UGT, UGE, URem, UDiv,
     sat, unsat, unknown, ForAll, Exists,
 )
-from spec import ArenaSpec
+from .spec import ArenaSpec
 
 
 @dataclass

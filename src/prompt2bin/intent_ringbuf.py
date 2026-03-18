@@ -8,7 +8,7 @@ import json
 import re
 import shutil
 import subprocess
-from spec import RingBufferSpec, RingBufferMode, ElementType
+from .spec import RingBufferSpec, RingBufferMode, ElementType
 
 
 # ── Claude CLI translator ──

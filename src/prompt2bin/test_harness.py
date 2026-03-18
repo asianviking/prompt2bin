@@ -10,7 +10,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from spec import ArenaSpec
+from .spec import ArenaSpec
 
 
 def generate_test_c(spec: ArenaSpec, header_path: str) -> str:

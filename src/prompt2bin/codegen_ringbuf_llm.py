@@ -9,7 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from spec import RingBufferSpec, RingBufferMode
+from .spec import RingBufferSpec, RingBufferMode
 
 
 SYSTEM_PROMPT = "You generate C header-only libraries. Output ONLY C code. No markdown, no explanation."

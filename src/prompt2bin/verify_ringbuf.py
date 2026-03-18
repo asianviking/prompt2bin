@@ -15,8 +15,8 @@ from z3 import (
     ULT, ULE, UGT, UGE, URem, UDiv,
     sat, unsat,
 )
-from spec import RingBufferSpec
-from verify import VerificationResult, is_power_of_two
+from .spec import RingBufferSpec
+from .verify import VerificationResult, is_power_of_two
 
 
 def verify_ringbuf_spec(spec: RingBufferSpec) -> list[VerificationResult]:

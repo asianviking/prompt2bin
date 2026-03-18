@@ -14,7 +14,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from spec import RingBufferSpec
+from .spec import RingBufferSpec
 
 
 def generate_test_c(spec: RingBufferSpec, header_path: str) -> str:

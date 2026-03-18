@@ -6,7 +6,7 @@ implementation. The generated code is structured to match the
 properties that were formally verified.
 """
 
-from spec import ArenaSpec, AllocStrategy, GrowthPolicy, ThreadSafety
+from .spec import ArenaSpec, AllocStrategy, GrowthPolicy, ThreadSafety
 
 
 def generate_c(spec: ArenaSpec) -> str:

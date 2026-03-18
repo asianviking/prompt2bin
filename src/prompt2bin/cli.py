@@ -25,20 +25,20 @@ import os
 from pathlib import Path
 
 # Arena domain
-from intent import intent_to_spec as intent_to_arena
-from verify import verify_spec as verify_arena
-from codegen import generate_c as generate_arena_template
-from codegen_llm import generate_c_llm as generate_arena_llm
-from test_harness import run_test_harness as run_arena_test
+from .intent import intent_to_spec as intent_to_arena
+from .verify import verify_spec as verify_arena
+from .codegen import generate_c as generate_arena_template
+from .codegen_llm import generate_c_llm as generate_arena_llm
+from .test_harness import run_test_harness as run_arena_test
 
 # Ring buffer domain
-from intent_ringbuf import intent_to_ringbuf
-from verify_ringbuf import verify_ringbuf_spec
-from codegen_ringbuf_llm import generate_ringbuf_llm
-from test_ringbuf import run_ringbuf_test
+from .intent_ringbuf import intent_to_ringbuf
+from .verify_ringbuf import verify_ringbuf_spec
+from .codegen_ringbuf_llm import generate_ringbuf_llm
+from .test_ringbuf import run_ringbuf_test
 
 # Project system
-from project import load_project, ensure_build_dir, init_project
+from .project import load_project, ensure_build_dir, init_project
 
 
 BANNER = """
@@ -398,7 +398,7 @@ def main():
             print(f"")
             print(f"    1. Edit specs/example.prompt (or add more .prompt files)")
             print(f"    2. Update build.toml with your components")
-            print(f"    3. Run: python3 prompt2bin.py build {sys.argv[2]}")
+            print(f"    3. Run: prompt2bin build {sys.argv[2]}")
             print()
         except FileExistsError as e:
             print(f"\n  ✗ {e}")

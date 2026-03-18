@@ -45,25 +45,38 @@ GCC → x86-64 assembly (.s) + machine code (.o)
 
 Every stage is a quality gate. Z3 blocks code generation if any safety property fails. The test harness catches runtime bugs the formal proof can't cover. GCC catches anything the LLM got syntactically wrong. If any gate fails, you get a clear error — not a broken binary.
 
+## Install
+
+```bash
+pip install prompt2bin
+```
+
+Requires GCC and [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) for AI translation and codegen.
+
 ## Usage
 
 Single prompt:
 
 ```bash
-pip install z3-solver
-python3 prompt2bin.py "I want a fast game frame allocator, 64KB, nothing fancy"
+prompt2bin "I want a fast game frame allocator, 64KB, nothing fancy"
 ```
 
-Project build (multiple components from `.prompt` files):
+Scaffold a new project:
 
 ```bash
-python3 prompt2bin.py build sample_project/
+prompt2bin init my_project
+```
+
+Build a project (multiple components from `.prompt` files):
+
+```bash
+prompt2bin build my_project/
 ```
 
 Interactive mode:
 
 ```bash
-python3 prompt2bin.py --interactive
+prompt2bin --interactive
 ```
 
 ## Project builds
@@ -160,9 +173,11 @@ page_size=100, min_align=3
 
 ## Architecture
 
-| File | Role |
-|------|------|
-| `prompt2bin.py` | Pipeline orchestrator + project build system |
+All source lives in `src/prompt2bin/`:
+
+| Module | Role |
+|--------|------|
+| `cli.py` | Pipeline orchestrator + project build system |
 | `project.py` | TOML project loader (`build.toml` → component configs) |
 | `spec.py` | Formal spec formats (ArenaSpec, RingBufferSpec) |
 | `intent.py` | Arena intent translator (Claude CLI + regex fallback) |
@@ -178,6 +193,5 @@ page_size=100, min_align=3
 ## Requirements
 
 - Python 3.11+
-- `z3-solver` (`pip install z3-solver`)
-- GCC (for assembly/binary compilation)
-- Claude CLI (for AI translation and codegen — regex fallback available for intent parsing)
+- GCC
+- [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) (for AI translation and codegen — regex fallback available for intent parsing)

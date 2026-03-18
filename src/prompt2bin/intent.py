@@ -15,7 +15,7 @@ import os
 import re
 import shutil
 import subprocess
-from spec import (
+from .spec import (
     ArenaSpec, AllocStrategy, GrowthPolicy, ThreadSafety,
     MemoryBounds, AlignmentSpec, SafetyInvariants, PerformanceConstraints,
 )

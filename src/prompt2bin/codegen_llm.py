@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import asdict
-from spec import ArenaSpec
+from .spec import ArenaSpec
 
 
 SYSTEM_PROMPT = """\
