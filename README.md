@@ -1,6 +1,19 @@
-# prompt2bin
+```
+                                  _   ____  _     _
+  _ __  _ __ ___  _ __ ___  _ __ | |_|___ \| |__ (_)_ __
+ | '_ \| '__/ _ \| '_ ` _ \| '_ \| __| __) | '_ \| | '_ \
+ | |_) | | | (_) | | | | | | |_) | |_ / __/| |_) | | | | |
+ | .__/|_|  \___/|_| |_| |_| .__/ \__|_____|_.__/|_|_| |_|
+ |_|                        |_|
+```
 
-An AI-first compiler. Natural language in, verified machine code out.
+**Natural language in, verified machine code out.**
+
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.3.0-orange)](https://github.com/asianviking/prompt2bin)
+
+---
 
 ## The idea
 
@@ -11,9 +24,15 @@ Most programming languages were designed for humans to communicate with machines
 No syntax to learn. No language to master. Just intent → verified binary.
 
 ```
-Component prompts → formal specs → Z3 proves safety → LLM generates C components
-App prompt → LLM generates main.c wiring everything together
-GCC → x86-64 assembly + linkable machine code → working application
+"I need a lock-free audio ring buffer"
+     ↓
+  formal spec → Z3 proves 7/7 safety properties
+     ↓
+  LLM generates C → test harness validates
+     ↓
+  GCC → x86-64 assembly + machine code
+     ↓
+  audio_ringbuf.h  audio_ringbuf.s  audio_ringbuf.o
 ```
 
 ## Why this matters
@@ -29,11 +48,11 @@ This is a prototype exploring that future. It works today for multiple domains (
 ```
 Component .prompt files (one per component)
      ↓
-Claude CLI → formal spec (structured, machine-readable)
+LLM → formal spec (structured, machine-readable)
      ↓
 Z3 SMT solver → proves safety properties (blocks codegen on failure)
      ↓
-Claude LLM → generates C code (header-only library per component)
+LLM → generates C code (header-only library per component)
      ↓
 Test harness → compiles and runs validation tests
      ↓
@@ -65,15 +84,25 @@ Requires GCC and at least one LLM backend:
 
 Auto-detects in priority order: CLI > API key. Set `P2B_BACKEND` to override.
 
-## Usage
+## Quick start
 
 `p2b` is the short alias for `prompt2bin` — both work everywhere.
 
 ```bash
-p2b init my_project          # scaffold a new project
-p2b build my_project         # build all components
-p2b "I need a memory pool"   # single prompt, one-shot
-p2b --interactive            # interactive mode
+# one-shot: describe what you need, get a binary
+p2b "I need a memory pool for allocating small objects"
+
+# scaffold a new project
+p2b init my_project
+
+# build all components + generate main.c + compile
+p2b build my_project
+
+# build and run
+p2b run my_project
+
+# interactive mode
+p2b --interactive
 ```
 
 ## Project builds
@@ -85,21 +114,27 @@ my_project/
 ├── build.toml
 ├── app.prompt                # describes the application: what it does, how components wire together
 ├── specs/
-│   ├── memory_pool.prompt    # “I need a memory pool for allocating small objects...”
-│   └── message_queue.prompt  # “I need a queue for passing messages between two threads...”
+│   ├── memory_pool.prompt    # "I need a memory pool for allocating small objects..."
+│   └── message_queue.prompt  # "I need a queue for passing messages between two threads..."
 └── build/                    # generated: .h .s .o for each component + main.c
 ```
 
 ```toml
 [project]
-name = “my_project”
-target = “x86-64-linux”
+name = "my_project"
+target = "x86-64-linux"
+
+[model]                         # optional: per-project LLM configuration
+backend = "anthropic-api"       # claude, codex, anthropic-api, openai-api
+name = "claude-sonnet-4-6"
+reasoning = "high"              # low, medium, high
+temperature = 0.2
 
 [components.memory_pool]
-prompt = “specs/memory_pool.prompt”
+prompt = "specs/memory_pool.prompt"
 
 [components.message_queue]
-prompt = “specs/message_queue.prompt”
+prompt = "specs/message_queue.prompt"
 ```
 
 The `app.prompt` describes what the application does — how the components work together as a whole:
@@ -112,7 +147,9 @@ Interactive demo that allocates objects and passes messages.
 - Clean up and exit with a summary
 ```
 
-`prompt2bin build` reads each component `.prompt` file, runs the full pipeline, then uses the `app.prompt` + generated component headers to produce a complete `main.c` via LLM. Every piece of code — components and application glue — is generated from prompts.
+`p2b build` reads each component `.prompt` file, runs the full pipeline, then uses the `app.prompt` + generated component headers to produce a complete `main.c` via LLM. Every piece of code — components and application glue — is generated from prompts.
+
+### Templates
 
 Two built-in templates to get started:
 
@@ -122,6 +159,12 @@ p2b init my_project --template grok-cli    # interactive xAI Grok API client
 ```
 
 See `sample_grok_cli/` for a complete example — an interactive CLI that calls the xAI Grok API, built entirely from prompts.
+
+### Build features
+
+- **Incremental caching** — skips unchanged components (SHA-256 of prompt text)
+- **Parallel builds** — components compile concurrently (up to 4 workers)
+- **Per-project model config** — choose backend, model, reasoning level, and temperature per project
 
 ## Domains
 
@@ -138,7 +181,7 @@ Fork/exec wrappers with captured stdout/stderr, timeouts, and pipe-based stdin f
 Interned string storage with hashing and deduplication. Z3 proves table sizing, index masking safety, and storage bounds.
 
 ### Terminal I/O
-Bounded line input + history utilities for interactive CLIs. Z3 proves cursor/index bounds and that input can’t overflow buffers.
+Bounded line input + history utilities for interactive CLIs. Z3 proves cursor/index bounds and that input can't overflow buffers.
 
 Adding a new domain requires: a spec format, Z3 verification properties, and an intent translator. The LLM codegen and test harness handle the rest.
 
@@ -206,7 +249,7 @@ page_size=100, min_align=3
 | `timeout_positive` | Timeout is positive |
 | `arg_length_valid` | Argument length is positive and bounded |
 | `bounded_memory` | Total memory is statically bounded |
-| `no_buffer_overflow` | Captured output can’t overflow buffers |
+| `no_buffer_overflow` | Captured output can't overflow buffers |
 | `env_bounded` | Environment variable count is bounded |
 
 ### String tables
@@ -218,7 +261,7 @@ page_size=100, min_align=3
 | `string_length_bounded` | Max string length fits total storage |
 | `bounded_memory` | Total memory is statically bounded |
 | `hash_mask_valid` | Hash masking always yields a valid index |
-| `no_storage_overflow` | String storage can’t overflow |
+| `no_storage_overflow` | String storage can't overflow |
 | `string_count_bounded` | Max strings is positive |
 
 ### Terminal I/O
@@ -231,7 +274,7 @@ page_size=100, min_align=3
 | `bounded_memory` | Total memory is statically bounded |
 | `cursor_bounds` | Cursor stays within line bounds |
 | `history_index` | History index always refers to a valid slot |
-| `no_input_overflow` | Input can’t overflow line buffer |
+| `no_input_overflow` | Input can't overflow line buffer |
 
 ## Architecture
 
@@ -242,6 +285,7 @@ All source lives in `src/prompt2bin/`:
 | `cli.py` | Pipeline orchestrator + project build system + LLM-based main.c generation |
 | `llm.py` | LLM backend abstraction (Claude CLI / Codex CLI / Anthropic API / OpenAI API) |
 | `project.py` | TOML project loader (`build.toml` + `app.prompt` → project config) |
+| `cache.py` | SHA-256 incremental build cache |
 | `spec.py` | Formal spec formats (ArenaSpec, RingBufferSpec, ProcessSpawnerSpec, StringTableSpec, TermIOSpec) |
 | `intent.py` | Arena intent translator (Claude CLI + regex fallback) |
 | `intent_ringbuf.py` | Ring buffer intent translator |
@@ -272,3 +316,7 @@ All source lives in `src/prompt2bin/`:
 - LLM backend (at least one):
   - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) or [Codex CLI](https://github.com/openai/codex) (no API key needed)
   - Or set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (install SDK: `pip install prompt2bin[anthropic]` or `pip install prompt2bin[openai]`)
+
+## License
+
+MIT
