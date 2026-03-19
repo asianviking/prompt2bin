@@ -259,13 +259,16 @@ def compile_pipeline(intent: str, output_dir: str = ".", name_override: str | No
 
 def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """Arena allocator pipeline."""
-    print("\n▸ Phase 1: Translating intent → formal spec...")
+    print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
+    t0 = time.monotonic()
     spec = intent_to_arena(intent)
     if name_override:
         spec.name = name_override
+    print(f"  ({time.monotonic() - t0:.1f}s)")
     print(spec.describe())
 
-    print("\n▸ Phase 2: Verifying spec with Z3...")
+    print("\n▸ Phase 2: Verifying spec with Z3...", flush=True)
+    t0 = time.monotonic()
     results = verify_arena(spec)
     all_passed = True
     for r in results:
@@ -279,10 +282,11 @@ def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
         return False
-    print(f"\n  All {len(results)} properties verified ✓")
+    print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
-    print("\n▸ Phase 3: Generating C code via LLM...")
+    print("\n▸ Phase 3: Generating C code via LLM...", flush=True)
+    t0 = time.monotonic()
     c_code = generate_arena_llm(spec, verified_properties=verified_props)
     codegen_source = "Claude"
 
@@ -295,11 +299,12 @@ def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source}, {time.monotonic() - t0:.1f}s)")
 
-    print("\n▸ Phase 3b: Running test harness...")
+    print("\n▸ Phase 3b: Running test harness...", flush=True)
+    t0 = time.monotonic()
     test_ok, test_msg = run_arena_test(spec, output_path)
-    print(f"  {test_msg}")
+    print(f"  {test_msg} ({time.monotonic() - t0:.1f}s)")
     if not test_ok and codegen_source == "Claude":
         print("  LLM code failed — falling back to template")
         c_code = generate_arena_template(spec)
@@ -316,13 +321,16 @@ def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None
 
 def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """Ring buffer pipeline."""
-    print("\n▸ Phase 1: Translating intent → formal spec...")
+    print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
+    t0 = time.monotonic()
     spec = intent_to_ringbuf(intent)
     if name_override:
         spec.name = name_override
+    print(f"  ({time.monotonic() - t0:.1f}s)")
     print(spec.describe())
 
-    print("\n▸ Phase 2: Verifying spec with Z3...")
+    print("\n▸ Phase 2: Verifying spec with Z3...", flush=True)
+    t0 = time.monotonic()
     results = verify_ringbuf_spec(spec)
     all_passed = True
     for r in results:
@@ -336,10 +344,11 @@ def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | No
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
         return False
-    print(f"\n  All {len(results)} properties verified ✓")
+    print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
-    print("\n▸ Phase 3: Generating C code via LLM...")
+    print("\n▸ Phase 3: Generating C code via LLM...", flush=True)
+    t0 = time.monotonic()
     c_code = generate_ringbuf_llm(spec, verified_properties=verified_props)
     codegen_source = "Claude"
 
@@ -351,11 +360,12 @@ def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | No
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source}, {time.monotonic() - t0:.1f}s)")
 
-    print("\n▸ Phase 3b: Running test harness...")
+    print("\n▸ Phase 3b: Running test harness...", flush=True)
+    t0 = time.monotonic()
     test_ok, test_msg = run_ringbuf_test(spec, output_path)
-    print(f"  {test_msg}")
+    print(f"  {test_msg} ({time.monotonic() - t0:.1f}s)")
     if not test_ok:
         print("  ⚠ Tests failed — code generated but may have issues")
 
@@ -365,13 +375,16 @@ def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | No
 
 def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """Process spawner pipeline."""
-    print("\n▸ Phase 1: Translating intent → formal spec...")
+    print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
+    t0 = time.monotonic()
     spec = intent_to_proc(intent)
     if name_override:
         spec.name = name_override
+    print(f"  ({time.monotonic() - t0:.1f}s)")
     print(spec.describe())
 
-    print("\n▸ Phase 2: Verifying spec with Z3...")
+    print("\n▸ Phase 2: Verifying spec with Z3...", flush=True)
+    t0 = time.monotonic()
     results = verify_proc_spec(spec)
     all_passed = True
     for r in results:
@@ -385,10 +398,11 @@ def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None 
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
         return False
-    print(f"\n  All {len(results)} properties verified ✓")
+    print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
-    print("\n▸ Phase 3: Generating C code via LLM...")
+    print("\n▸ Phase 3: Generating C code via LLM...", flush=True)
+    t0 = time.monotonic()
     c_code = generate_proc_llm(spec, verified_properties=verified_props)
     codegen_source = "Claude"
 
@@ -400,11 +414,12 @@ def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None 
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source}, {time.monotonic() - t0:.1f}s)")
 
-    print("\n▸ Phase 3b: Running test harness...")
+    print("\n▸ Phase 3b: Running test harness...", flush=True)
+    t0 = time.monotonic()
     test_ok, test_msg = run_proc_test(spec, output_path)
-    print(f"  {test_msg}")
+    print(f"  {test_msg} ({time.monotonic() - t0:.1f}s)")
     if not test_ok:
         print("  ⚠ Tests failed — code generated but may have issues")
 
@@ -414,13 +429,16 @@ def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None 
 
 def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """String table pipeline."""
-    print("\n▸ Phase 1: Translating intent → formal spec...")
+    print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
+    t0 = time.monotonic()
     spec = intent_to_strtab(intent)
     if name_override:
         spec.name = name_override
+    print(f"  ({time.monotonic() - t0:.1f}s)")
     print(spec.describe())
 
-    print("\n▸ Phase 2: Verifying spec with Z3...")
+    print("\n▸ Phase 2: Verifying spec with Z3...", flush=True)
+    t0 = time.monotonic()
     results = verify_strtab_spec(spec)
     all_passed = True
     for r in results:
@@ -434,10 +452,11 @@ def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | Non
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
         return False
-    print(f"\n  All {len(results)} properties verified ✓")
+    print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
-    print("\n▸ Phase 3: Generating C code via LLM...")
+    print("\n▸ Phase 3: Generating C code via LLM...", flush=True)
+    t0 = time.monotonic()
     c_code = generate_strtab_llm(spec, verified_properties=verified_props)
     codegen_source = "Claude"
 
@@ -449,11 +468,12 @@ def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | Non
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source}, {time.monotonic() - t0:.1f}s)")
 
-    print("\n▸ Phase 3b: Running test harness...")
+    print("\n▸ Phase 3b: Running test harness...", flush=True)
+    t0 = time.monotonic()
     test_ok, test_msg = run_strtab_test(spec, output_path)
-    print(f"  {test_msg}")
+    print(f"  {test_msg} ({time.monotonic() - t0:.1f}s)")
     if not test_ok:
         print("  ⚠ Tests failed — code generated but may have issues")
 
@@ -463,13 +483,16 @@ def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | Non
 
 def _compile_termio(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """Terminal I/O pipeline."""
-    print("\n▸ Phase 1: Translating intent → formal spec...")
+    print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
+    t0 = time.monotonic()
     spec = intent_to_termio(intent)
     if name_override:
         spec.name = name_override
+    print(f"  ({time.monotonic() - t0:.1f}s)")
     print(spec.describe())
 
-    print("\n▸ Phase 2: Verifying spec with Z3...")
+    print("\n▸ Phase 2: Verifying spec with Z3...", flush=True)
+    t0 = time.monotonic()
     results = verify_termio_spec(spec)
     all_passed = True
     for r in results:
@@ -483,10 +506,11 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
         return False
-    print(f"\n  All {len(results)} properties verified ✓")
+    print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
-    print("\n▸ Phase 3: Generating C code via LLM...")
+    print("\n▸ Phase 3: Generating C code via LLM...", flush=True)
+    t0 = time.monotonic()
     c_code = generate_termio_llm(spec, verified_properties=verified_props)
     codegen_source = "Claude"
 
@@ -498,11 +522,12 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source}, {time.monotonic() - t0:.1f}s)")
 
-    print("\n▸ Phase 3b: Running test harness...")
+    print("\n▸ Phase 3b: Running test harness...", flush=True)
+    t0 = time.monotonic()
     test_ok, test_msg = run_termio_test(spec, output_path)
-    print(f"  {test_msg}")
+    print(f"  {test_msg} ({time.monotonic() - t0:.1f}s)")
     if not test_ok:
         print("  ⚠ Tests failed — code generated but may have issues")
 
@@ -512,7 +537,8 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
 
 def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, output_dir="."):
     """Phase 4: Compile to assembly and machine code."""
-    print("\n▸ Phase 4: Compiling to assembly and machine code...")
+    print("\n▸ Phase 4: Compiling to assembly and machine code...", flush=True)
+    t0 = time.monotonic()
     asm_path, obj_path, err = compile_to_binary(c_code, name, domain, output_dir)
 
     if err:
@@ -522,6 +548,7 @@ def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, outpu
         obj_size = os.path.getsize(obj_path)
         print(f"  {_relpath(asm_path):30s} — {asm_size:>6,} bytes (assembly)")
         print(f"  {_relpath(obj_path):30s} — {obj_size:>6,} bytes (machine code)")
+        print(f"  ({time.monotonic() - t0:.1f}s)")
         show_assembly_highlights(asm_path, hot_func, hot_label)
 
     print(f"\n{'═' * 60}")
@@ -735,18 +762,21 @@ def _generate_main_c_llm(build_dir: Path, components: list[str],
 
     max_retries = 2
     for attempt in range(1, max_retries + 2):
-        print(f"  ⟳ Generating main.c via LLM (attempt {attempt})...")
+        print(f"  ⟳ Generating main.c via LLM (attempt {attempt})...", flush=True)
+        t0 = time.monotonic()
         raw = llm.generate(prompt, system_prompt, timeout=120)
+        dt = time.monotonic() - t0
         if not raw:
-            print("  ⚠ LLM returned empty response")
+            print(f"  ⚠ LLM returned empty response ({dt:.1f}s)")
             continue
 
+        print(f"  ✓ LLM responded ({dt:.1f}s), validating with GCC...")
         c_code = _extract_c_code(raw)
         ok, err = _gcc_check_main(c_code, build_dir, components)
         if ok:
             main_path = build_dir / "main.c"
             main_path.write_text(c_code)
-            print("  ✓ main.c generated successfully")
+            print(f"  ✓ main.c generated successfully")
             return main_path
 
         print(f"  ⚠ GCC check failed (attempt {attempt})")
