@@ -128,7 +128,7 @@ def _gcc_check(c_code: str) -> tuple[bool, str]:
 def _call_llm(prompt: str, attempt: int = 1) -> str | None:
     """Call LLM backend and return raw text output."""
     from . import llm
-    return llm.generate(prompt, SYSTEM_PROMPT, timeout=90)
+    return llm.generate(prompt, SYSTEM_PROMPT)
 
 
 def generate_c_llm(

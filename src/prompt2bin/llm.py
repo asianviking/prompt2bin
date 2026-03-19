@@ -155,7 +155,7 @@ def _claude_structured(prompt: str, system_prompt: str, json_schema: str, timeou
     return None
 
 
-def _claude_generate(prompt: str, system_prompt: str, timeout: int = 90) -> str | None:
+def _claude_generate(prompt: str, system_prompt: str, timeout: int | None = None) -> str | None:
     """Call Claude CLI for raw text generation."""
     claude_bin = shutil.which("claude")
     if not claude_bin:
@@ -261,7 +261,7 @@ def _codex_structured(prompt: str, system_prompt: str, json_schema: str, timeout
     return None
 
 
-def _codex_generate(prompt: str, system_prompt: str, timeout: int = 90) -> str | None:
+def _codex_generate(prompt: str, system_prompt: str, timeout: int | None = None) -> str | None:
     """Call Codex CLI for raw text generation."""
     codex_bin, instructions_path = _codex_with_instructions(system_prompt)
     if not codex_bin:
@@ -337,7 +337,7 @@ def _anthropic_api_structured(prompt: str, system_prompt: str, json_schema: str,
     return None
 
 
-def _anthropic_api_generate(prompt: str, system_prompt: str, timeout: int = 90) -> str | None:
+def _anthropic_api_generate(prompt: str, system_prompt: str, timeout: int | None = None) -> str | None:
     """Call Anthropic API for raw text generation."""
     client = _get_anthropic_client()
     if not client:
@@ -422,7 +422,7 @@ def _openai_api_structured(prompt: str, system_prompt: str, json_schema: str, ti
         return None
 
 
-def _openai_api_generate(prompt: str, system_prompt: str, timeout: int = 90) -> str | None:
+def _openai_api_generate(prompt: str, system_prompt: str, timeout: int | None = None) -> str | None:
     """Call OpenAI API for raw text generation."""
     client = _get_openai_client()
     if not client:
@@ -436,8 +436,9 @@ def _openai_api_generate(prompt: str, system_prompt: str, timeout: int = 90) -> 
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
-        timeout=timeout,
     )
+    if timeout is not None:
+        kwargs["timeout"] = timeout
     temp = _get_temperature()
     if temp is not None:
         kwargs["temperature"] = temp
@@ -474,9 +475,12 @@ def structured(prompt: str, system_prompt: str, json_schema: str, timeout: int =
     return fn(prompt, system_prompt, json_schema, timeout)
 
 
-def generate(prompt: str, system_prompt: str, timeout: int = 90) -> str | None:
+def generate(prompt: str, system_prompt: str, timeout: int | None = None) -> str | None:
     """
     Generate raw text (C code) using the configured LLM backend.
+
+    No timeout by default — LLM code generation can legitimately take
+    minutes on complex prompts.  Users can Ctrl+C to cancel.
 
     Returns the generated text, or None on failure.
     """

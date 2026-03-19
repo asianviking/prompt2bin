@@ -118,7 +118,7 @@ def generate_strtab_llm(
     prompt = _spec_to_prompt(spec, verified_properties)
 
     for attempt in range(1, max_retries + 2):
-        raw = llm.generate(prompt, SYSTEM_PROMPT, timeout=180)
+        raw = llm.generate(prompt, SYSTEM_PROMPT)
         if not raw:
             print(f"  LLM returned no output")
             return None
