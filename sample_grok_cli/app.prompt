@@ -11,3 +11,4 @@ Interactive CLI for the xAI Grok API.
 - Maintain multi-turn conversation by sending full message history each request
 - Handle JSON escaping for user input (escape quotes, backslashes, newlines)
 - Rotate oldest messages when context_store is full
+- Handle SIGINT (Ctrl+C) gracefully: install a signal handler that prints a newline and exits cleanly with code 0 instead of crashing
