@@ -599,13 +599,19 @@ def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
     cache = BuildCache(build_dir)
     t_start = time.monotonic()
 
+    model_info = llm.get_model_info()
+
     print(f"\n{'═' * 60}")
     print(f"  prompt2bin build: {project.name}")
     print(f"  Target: {project.target}")
     print(f"  Components: {len(project.components)}")
-    if project.model.backend or project.model.name:
-        model_info = project.model.name or project.model.backend
-        print(f"  Model: {model_info}")
+    print(f"  Backend: {model_info['backend']}")
+    if "model" in model_info:
+        print(f"  Model: {model_info['model']}")
+    if "reasoning" in model_info:
+        print(f"  Reasoning: {model_info['reasoning']}")
+    if "temperature" in model_info:
+        print(f"  Temperature: {model_info['temperature']}")
     print(f"  Output: {_relpath(build_dir)}/")
     print(f"{'═' * 60}")
 

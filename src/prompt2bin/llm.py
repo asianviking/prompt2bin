@@ -82,6 +82,29 @@ def get_backend() -> str:
     return _detect_backend()
 
 
+def get_model_info() -> dict[str, str]:
+    """Return a dict of active model settings for display."""
+    info: dict[str, str] = {"backend": _detect_backend()}
+
+    backend = info["backend"]
+    if backend == "claude":
+        info["model"] = _claude_model_arg()
+    elif backend == "anthropic-api":
+        info["model"] = _get_model("P2B_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+    elif backend == "openai-api":
+        info["model"] = _get_model("P2B_OPENAI_MODEL", "gpt-4o-mini")
+    elif backend == "codex":
+        info["model"] = "codex"
+
+    if _model_config:
+        if _model_config.reasoning:
+            info["reasoning"] = _model_config.reasoning
+        if _model_config.temperature is not None:
+            info["temperature"] = str(_model_config.temperature)
+
+    return info
+
+
 # ── Claude CLI backend ──
 
 def _claude_model_arg() -> str:
