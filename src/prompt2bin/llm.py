@@ -13,17 +13,37 @@ Two operations:
   - generate():   prompt + system prompt → raw text (C code)
 """
 
+from __future__ import annotations
+
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from prompt2bin.project import ModelConfig
 
 BACKENDS = ("claude", "codex", "anthropic-api", "openai-api")
+
+# Module-level model config, set by configure() from build.toml [model] section.
+_model_config: ModelConfig | None = None
+
+
+def configure(model_config: ModelConfig | None) -> None:
+    """Set the active model config (from build.toml). Call before any LLM ops."""
+    global _model_config
+    _model_config = model_config
 
 
 def _detect_backend() -> str:
     """Detect which LLM backend to use."""
+    # build.toml [model] backend takes priority
+    if _model_config and _model_config.backend:
+        if _model_config.backend in BACKENDS:
+            return _model_config.backend
+
     env = os.environ.get("P2B_BACKEND", "").lower()
     if env in BACKENDS:
         return env
@@ -43,12 +63,33 @@ def _detect_backend() -> str:
     return "claude"  # will fail with a helpful message later
 
 
+def _get_model(env_var: str, default: str) -> str:
+    """Resolve model name: build.toml > env var > default."""
+    if _model_config and _model_config.name:
+        return _model_config.name
+    return os.environ.get(env_var, default)
+
+
+def _get_temperature() -> float | None:
+    """Get temperature from build.toml [model] if set."""
+    if _model_config and _model_config.temperature is not None:
+        return _model_config.temperature
+    return None
+
+
 def get_backend() -> str:
     """Return the active backend name."""
     return _detect_backend()
 
 
 # ── Claude CLI backend ──
+
+def _claude_model_arg() -> str:
+    """Resolve Claude CLI --model arg: build.toml > default."""
+    if _model_config and _model_config.name:
+        return _model_config.name
+    return "haiku"
+
 
 def _claude_structured(prompt: str, system_prompt: str, json_schema: str, timeout: int = 60) -> dict | None:
     """Call Claude CLI with --json-schema for structured output."""
@@ -64,7 +105,7 @@ def _claude_structured(prompt: str, system_prompt: str, json_schema: str, timeou
                 "--system-prompt", system_prompt,
                 "--json-schema", json_schema,
                 "--tools", "",
-                "--model", "haiku",
+                "--model", _claude_model_arg(),
                 prompt,
             ],
             capture_output=True,
@@ -103,7 +144,7 @@ def _claude_generate(prompt: str, system_prompt: str, timeout: int = 90) -> str 
                 claude_bin, "-p",
                 "--system-prompt", system_prompt,
                 "--tools", "",
-                "--model", "haiku",
+                "--model", _claude_model_arg(),
                 prompt,
             ],
             capture_output=True,
@@ -244,21 +285,26 @@ def _anthropic_api_structured(prompt: str, system_prompt: str, json_schema: str,
         return None
 
     schema = json.loads(json_schema)
-    model = os.environ.get("P2B_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+    model = _get_model("P2B_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+
+    kwargs: dict = dict(
+        model=model,
+        max_tokens=1024,
+        system=system_prompt,
+        tools=[{
+            "name": "spec",
+            "description": "Output the structured spec",
+            "input_schema": schema,
+        }],
+        tool_choice={"type": "tool", "name": "spec"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    temp = _get_temperature()
+    if temp is not None:
+        kwargs["temperature"] = temp
 
     try:
-        response = client.messages.create(
-            model=model,
-            max_tokens=1024,
-            system=system_prompt,
-            tools=[{
-                "name": "spec",
-                "description": "Output the structured spec",
-                "input_schema": schema,
-            }],
-            tool_choice={"type": "tool", "name": "spec"},
-            messages=[{"role": "user", "content": prompt}],
-        )
+        response = client.messages.create(**kwargs)
         for block in response.content:
             if block.type == "tool_use" and block.name == "spec":
                 return block.input
@@ -274,15 +320,25 @@ def _anthropic_api_generate(prompt: str, system_prompt: str, timeout: int = 90) 
     if not client:
         return None
 
-    model = os.environ.get("P2B_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+    model = _get_model("P2B_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+
+    kwargs: dict = dict(
+        model=model,
+        max_tokens=4096,
+        system=system_prompt,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    temp = _get_temperature()
+    if temp is not None:
+        kwargs["temperature"] = temp
+
+    # Extended thinking for reasoning=high on supported models
+    if _model_config and _model_config.reasoning == "high":
+        kwargs["thinking"] = {"type": "enabled", "budget_tokens": 2048}
+        kwargs.pop("temperature", None)  # thinking doesn't support temperature
 
     try:
-        response = client.messages.create(
-            model=model,
-            max_tokens=4096,
-            system=system_prompt,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        response = client.messages.create(**kwargs)
         return response.content[0].text
     except Exception as e:
         print(f"  ⚠ Anthropic API failed: {e}")
@@ -308,25 +364,34 @@ def _openai_api_structured(prompt: str, system_prompt: str, json_schema: str, ti
         return None
 
     schema = json.loads(json_schema)
-    model = os.environ.get("P2B_OPENAI_MODEL", "gpt-4o-mini")
+    model = _get_model("P2B_OPENAI_MODEL", "gpt-4o-mini")
+
+    kwargs: dict = dict(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "spec",
+                "strict": True,
+                "schema": schema,
+            },
+        },
+        timeout=timeout,
+    )
+    temp = _get_temperature()
+    if temp is not None:
+        kwargs["temperature"] = temp
+
+    # OpenAI reasoning models (o1, o3) use reasoning_effort
+    if _model_config and _model_config.reasoning:
+        kwargs["reasoning_effort"] = _model_config.reasoning
 
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "spec",
-                    "strict": True,
-                    "schema": schema,
-                },
-            },
-            timeout=timeout,
-        )
+        response = client.chat.completions.create(**kwargs)
         content = response.choices[0].message.content
         return json.loads(content)
     except Exception as e:
@@ -340,17 +405,25 @@ def _openai_api_generate(prompt: str, system_prompt: str, timeout: int = 90) -> 
     if not client:
         return None
 
-    model = os.environ.get("P2B_OPENAI_MODEL", "gpt-4o-mini")
+    model = _get_model("P2B_OPENAI_MODEL", "gpt-4o-mini")
+
+    kwargs: dict = dict(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        timeout=timeout,
+    )
+    temp = _get_temperature()
+    if temp is not None:
+        kwargs["temperature"] = temp
+
+    if _model_config and _model_config.reasoning:
+        kwargs["reasoning_effort"] = _model_config.reasoning
 
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            timeout=timeout,
-        )
+        response = client.chat.completions.create(**kwargs)
         return response.choices[0].message.content
     except Exception as e:
         print(f"  ⚠ OpenAI API failed: {e}")

@@ -591,6 +591,9 @@ def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
         print(f"\n✗ {e}")
         return False
 
+    # Apply model config from build.toml [model] section
+    llm.configure(project.model)
+
     build_dir = ensure_build_dir(project)
     cache = BuildCache(build_dir)
     t_start = time.monotonic()
@@ -599,6 +602,9 @@ def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
     print(f"  prompt2bin build: {project.name}")
     print(f"  Target: {project.target}")
     print(f"  Components: {len(project.components)}")
+    if project.model.backend or project.model.name:
+        model_info = project.model.name or project.model.backend
+        print(f"  Model: {model_info}")
     print(f"  Output: {_relpath(build_dir)}/")
     print(f"{'═' * 60}")
 

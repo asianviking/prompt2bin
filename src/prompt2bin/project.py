@@ -18,6 +18,15 @@ from pathlib import Path
 
 
 @dataclass
+class ModelConfig:
+    """LLM model configuration from [model] in build.toml. All fields optional."""
+    backend: str | None = None       # claude, codex, anthropic-api, openai-api
+    name: str | None = None          # model ID (e.g. claude-sonnet-4-6, gpt-4o)
+    reasoning: str | None = None     # low, medium, high — ignored if backend doesn't support it
+    temperature: float | None = None
+
+
+@dataclass
 class ComponentConfig:
     name: str
     prompt_path: Path
@@ -32,6 +41,7 @@ class ProjectConfig:
     components: dict[str, ComponentConfig]
     project_dir: Path = field(default_factory=lambda: Path("."))
     app_prompt: str | None = None
+    model: ModelConfig = field(default_factory=ModelConfig)
 
     @property
     def build_dir(self) -> Path:
@@ -57,6 +67,20 @@ def load_project(project_dir: str | Path = ".") -> ProjectConfig:
     proj = raw.get("project", {})
     name = proj.get("name", project_dir.name)
     target = proj.get("target", "x86-64-linux")
+
+    # Parse [model] section (all fields optional)
+    raw_model = raw.get("model", {})
+    model = ModelConfig(
+        backend=raw_model.get("backend"),
+        name=raw_model.get("name"),
+        reasoning=raw_model.get("reasoning"),
+        temperature=raw_model.get("temperature"),
+    )
+    if model.reasoning and model.reasoning not in ("low", "medium", "high"):
+        raise ValueError(
+            f"Invalid reasoning level '{model.reasoning}' in build.toml — "
+            f"must be low, medium, or high"
+        )
 
     # Parse [components.*] sections
     components = {}
@@ -104,6 +128,7 @@ def load_project(project_dir: str | Path = ".") -> ProjectConfig:
         components=components,
         project_dir=project_dir,
         app_prompt=app_prompt,
+        model=model,
     )
 
 
