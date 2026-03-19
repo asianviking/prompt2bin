@@ -592,6 +592,7 @@ def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
         return False
 
     # Apply model config from build.toml [model] section
+    from . import llm
     llm.configure(project.model)
 
     build_dir = ensure_build_dir(project)
