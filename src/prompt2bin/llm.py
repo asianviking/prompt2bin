@@ -30,6 +30,26 @@ BACKENDS = ("claude", "codex", "anthropic-api", "openai-api")
 # Module-level model config, set by configure() from build.toml [model] section.
 _model_config: ModelConfig | None = None
 
+# Module-level debug flag, set by set_debug() from CLI --debug flag.
+_debug: bool = False
+
+
+def set_debug(enabled: bool) -> None:
+    """Enable or disable debug output for all LLM operations."""
+    global _debug
+    _debug = enabled
+
+
+def is_debug() -> bool:
+    """Return whether debug mode is active."""
+    return _debug
+
+
+def _dbg(msg: str) -> None:
+    """Print a debug message if debug mode is active."""
+    if _debug:
+        print(f"[DEBUG] {msg}", flush=True)
+
 
 def configure(model_config: ModelConfig | None) -> None:
     """Set the active model config (from build.toml). Call before any LLM ops."""
@@ -118,28 +138,38 @@ def _claude_structured(prompt: str, system_prompt: str, json_schema: str, timeou
     """Call Claude CLI with --json-schema for structured output."""
     claude_bin = shutil.which("claude")
     if not claude_bin:
+        _dbg("Claude CLI not found")
         return None
+
+    cmd = [
+        claude_bin, "-p",
+        "--output-format", "json",
+        "--system-prompt", system_prompt,
+        "--json-schema", json_schema,
+        "--tools", "",
+        "--model", _claude_model_arg(),
+        prompt,
+    ]
+    _dbg(f"Command: {' '.join(cmd[:8])}... <prompt>")
 
     try:
-        result = subprocess.run(
-            [
-                claude_bin, "-p",
-                "--output-format", "json",
-                "--system-prompt", system_prompt,
-                "--json-schema", json_schema,
-                "--tools", "",
-                "--model", _claude_model_arg(),
-                prompt,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _dbg(f"Claude CLI timed out after {timeout}s")
+        return None
+    except FileNotFoundError:
+        _dbg("Claude CLI binary not found at execution time")
         return None
 
+    _dbg(f"Exit code: {result.returncode}")
+    if result.stderr:
+        _dbg(f"Stderr: {result.stderr[:500]}")
+
     if result.returncode != 0:
+        _dbg(f"Stdout on failure: {result.stdout[:500]}")
         return None
+
+    _dbg(f"Raw stdout ({len(result.stdout)} chars): {result.stdout[:500]}")
 
     try:
         response = json.loads(result.stdout)
@@ -149,9 +179,10 @@ def _claude_structured(prompt: str, system_prompt: str, json_schema: str, timeou
         raw = response.get("result", "")
         if isinstance(raw, str):
             return json.loads(raw)
-    except (json.JSONDecodeError, KeyError, TypeError):
-        pass
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        _dbg(f"JSON parse error: {e}")
 
+    _dbg("Failed to extract structured output from response")
     return None
 
 
@@ -159,27 +190,36 @@ def _claude_generate(prompt: str, system_prompt: str, timeout: int = 90) -> str 
     """Call Claude CLI for raw text generation."""
     claude_bin = shutil.which("claude")
     if not claude_bin:
+        _dbg("Claude CLI not found")
         return None
+
+    cmd = [
+        claude_bin, "-p",
+        "--system-prompt", system_prompt,
+        "--tools", "",
+        "--model", _claude_model_arg(),
+        prompt,
+    ]
+    _dbg(f"Command: {' '.join(cmd[:8])}... <prompt>")
 
     try:
-        result = subprocess.run(
-            [
-                claude_bin, "-p",
-                "--system-prompt", system_prompt,
-                "--tools", "",
-                "--model", _claude_model_arg(),
-                prompt,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _dbg(f"Claude CLI timed out after {timeout}s")
         return None
+    except FileNotFoundError:
+        _dbg("Claude CLI binary not found at execution time")
+        return None
+
+    _dbg(f"Exit code: {result.returncode}")
+    if result.stderr:
+        _dbg(f"Stderr: {result.stderr[:500]}")
 
     if result.returncode != 0:
+        _dbg(f"Stdout on failure: {result.stdout[:500]}")
         return None
 
+    _dbg(f"Response ({len(result.stdout)} chars): {result.stdout[:200]}...")
     return result.stdout
 
 
@@ -204,12 +244,14 @@ def _codex_structured(prompt: str, system_prompt: str, json_schema: str, timeout
     """Call Codex CLI with --json for structured output."""
     codex_bin, instructions_path = _codex_with_instructions(system_prompt)
     if not codex_bin:
+        _dbg("Codex CLI not found")
         return None
 
     full_prompt = (
         f"{prompt}\n\n"
         f"Respond with ONLY valid JSON matching this schema:\n{json_schema}"
     )
+    _dbg(f"Command: codex exec --json -c model_instructions_file=... <prompt>")
 
     try:
         result = subprocess.run(
@@ -223,13 +265,24 @@ def _codex_structured(prompt: str, system_prompt: str, json_schema: str, timeout
             text=True,
             timeout=timeout,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except subprocess.TimeoutExpired:
+        _dbg(f"Codex CLI timed out after {timeout}s")
+        return None
+    except FileNotFoundError:
+        _dbg("Codex CLI binary not found at execution time")
         return None
     finally:
         os.unlink(instructions_path)
 
+    _dbg(f"Exit code: {result.returncode}")
+    if result.stderr:
+        _dbg(f"Stderr: {result.stderr[:500]}")
+
     if result.returncode != 0:
+        _dbg(f"Stdout on failure: {result.stdout[:500]}")
         return None
+
+    _dbg(f"Raw stdout ({len(result.stdout)} chars): {result.stdout[:500]}")
 
     # Codex --json outputs JSONL events. Find the last agent message.
     last_message = None
@@ -251,6 +304,7 @@ def _codex_structured(prompt: str, system_prompt: str, json_schema: str, timeout
     try:
         return json.loads(last_message)
     except json.JSONDecodeError:
+        _dbg(f"Failed to parse last_message as JSON: {last_message[:200]}")
         for line in last_message.split("\n"):
             line = line.strip()
             if line.startswith("{"):
@@ -265,7 +319,10 @@ def _codex_generate(prompt: str, system_prompt: str, timeout: int = 90) -> str |
     """Call Codex CLI for raw text generation."""
     codex_bin, instructions_path = _codex_with_instructions(system_prompt)
     if not codex_bin:
+        _dbg("Codex CLI not found")
         return None
+
+    _dbg(f"Command: codex exec -c model_instructions_file=... <prompt>")
 
     try:
         result = subprocess.run(
@@ -278,14 +335,24 @@ def _codex_generate(prompt: str, system_prompt: str, timeout: int = 90) -> str |
             text=True,
             timeout=timeout,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except subprocess.TimeoutExpired:
+        _dbg(f"Codex CLI timed out after {timeout}s")
+        return None
+    except FileNotFoundError:
+        _dbg("Codex CLI binary not found at execution time")
         return None
     finally:
         os.unlink(instructions_path)
 
+    _dbg(f"Exit code: {result.returncode}")
+    if result.stderr:
+        _dbg(f"Stderr: {result.stderr[:500]}")
+
     if result.returncode != 0:
+        _dbg(f"Stdout on failure: {result.stdout[:500]}")
         return None
 
+    _dbg(f"Response ({len(result.stdout)} chars): {result.stdout[:200]}...")
     return result.stdout
 
 
@@ -326,14 +393,20 @@ def _anthropic_api_structured(prompt: str, system_prompt: str, json_schema: str,
     if temp is not None:
         kwargs["temperature"] = temp
 
+    _dbg(f"Anthropic API structured: model={model}, max_tokens=1024")
+
     try:
         response = client.messages.create(**kwargs)
+        _dbg(f"Response: stop_reason={response.stop_reason}, usage={response.usage}")
         for block in response.content:
+            _dbg(f"Content block: type={block.type}")
             if block.type == "tool_use" and block.name == "spec":
                 return block.input
     except Exception as e:
+        _dbg(f"Anthropic API exception: {type(e).__name__}: {e}")
         print(f"  ⚠ Anthropic API failed: {e}")
 
+    _dbg("No tool_use block found in response")
     return None
 
 
@@ -360,10 +433,16 @@ def _anthropic_api_generate(prompt: str, system_prompt: str, timeout: int = 90) 
         kwargs["thinking"] = {"type": "enabled", "budget_tokens": 2048}
         kwargs.pop("temperature", None)  # thinking doesn't support temperature
 
+    _dbg(f"Anthropic API generate: model={model}, max_tokens=4096")
+
     try:
         response = client.messages.create(**kwargs)
-        return response.content[0].text
+        _dbg(f"Response: stop_reason={response.stop_reason}, usage={response.usage}")
+        text = response.content[0].text
+        _dbg(f"Generated text ({len(text)} chars): {text[:200]}...")
+        return text
     except Exception as e:
+        _dbg(f"Anthropic API exception: {type(e).__name__}: {e}")
         print(f"  ⚠ Anthropic API failed: {e}")
         return None
 
@@ -413,11 +492,15 @@ def _openai_api_structured(prompt: str, system_prompt: str, json_schema: str, ti
     if _model_config and _model_config.reasoning:
         kwargs["reasoning_effort"] = _model_config.reasoning
 
+    _dbg(f"OpenAI API structured: model={model}")
+
     try:
         response = client.chat.completions.create(**kwargs)
         content = response.choices[0].message.content
+        _dbg(f"Response ({len(content)} chars): {content[:300]}")
         return json.loads(content)
     except Exception as e:
+        _dbg(f"OpenAI API exception: {type(e).__name__}: {e}")
         print(f"  ⚠ OpenAI API failed: {e}")
         return None
 
@@ -445,10 +528,15 @@ def _openai_api_generate(prompt: str, system_prompt: str, timeout: int = 90) -> 
     if _model_config and _model_config.reasoning:
         kwargs["reasoning_effort"] = _model_config.reasoning
 
+    _dbg(f"OpenAI API generate: model={model}")
+
     try:
         response = client.chat.completions.create(**kwargs)
-        return response.choices[0].message.content
+        text = response.choices[0].message.content
+        _dbg(f"Generated text ({len(text)} chars): {text[:200]}...")
+        return text
     except Exception as e:
+        _dbg(f"OpenAI API exception: {type(e).__name__}: {e}")
         print(f"  ⚠ OpenAI API failed: {e}")
         return None
 
@@ -470,8 +558,14 @@ def structured(prompt: str, system_prompt: str, json_schema: str, timeout: int =
     Returns a parsed dict matching the schema, or None on failure.
     """
     backend = _detect_backend()
+    _dbg(f"structured() via {backend}")
+    _dbg(f"System prompt ({len(system_prompt)} chars): {system_prompt[:150]}...")
+    _dbg(f"Prompt ({len(prompt)} chars): {prompt[:150]}...")
     fn = _DISPATCH[backend][0]
-    return fn(prompt, system_prompt, json_schema, timeout)
+    result = fn(prompt, system_prompt, json_schema, timeout)
+    if result is None:
+        _dbg("structured() returned None")
+    return result
 
 
 def generate(prompt: str, system_prompt: str, timeout: int = 90) -> str | None:
@@ -481,5 +575,11 @@ def generate(prompt: str, system_prompt: str, timeout: int = 90) -> str | None:
     Returns the generated text, or None on failure.
     """
     backend = _detect_backend()
+    _dbg(f"generate() via {backend}")
+    _dbg(f"System prompt ({len(system_prompt)} chars): {system_prompt[:150]}...")
+    _dbg(f"Prompt ({len(prompt)} chars): {prompt[:150]}...")
     fn = _DISPATCH[backend][1]
-    return fn(prompt, system_prompt, timeout)
+    result = fn(prompt, system_prompt, timeout)
+    if result is None:
+        _dbg("generate() returned None")
+    return result

@@ -117,11 +117,18 @@ def generate_strtab_llm(
     """Generate string table C code via LLM backend. Returns None on failure."""
     prompt = _spec_to_prompt(spec, verified_properties)
 
+    debug = llm.is_debug()
+
     for attempt in range(1, max_retries + 2):
+        if debug:
+            print(f"[DEBUG] strtab codegen prompt ({len(prompt)} chars, attempt {attempt})", flush=True)
         raw = llm.generate(prompt, SYSTEM_PROMPT, timeout=180)
         if not raw:
             print(f"  LLM returned no output")
             return None
+
+        if debug:
+            print(f"[DEBUG] Raw LLM response ({len(raw)} chars):\n{raw[:500]}", flush=True)
 
         c_code = _extract_c_code(raw)
         if not c_code or len(c_code) < 50:
@@ -134,6 +141,8 @@ def generate_strtab_llm(
 
         if attempt <= max_retries:
             print(f"  GCC rejected attempt {attempt}, retrying...")
+            if debug:
+                print(f"[DEBUG] GCC errors:\n{err}", flush=True)
             prompt = (
                 f"Your previous C code had compilation errors:\n\n{err}\n\n"
                 f"Fix the errors and regenerate. {_spec_to_prompt(spec, verified_properties)}"

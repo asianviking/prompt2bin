@@ -713,18 +713,24 @@ def _extract_c_code(raw: str) -> str:
 
 def _gcc_check_main(c_code: str, build_dir: Path, components: list[str]) -> tuple[bool, str]:
     """Compile main.c with GCC against component headers. Returns (success, errors)."""
+    from . import llm
+
     gcc = shutil.which("gcc")
     if not gcc:
         return True, ""
 
     main_path = build_dir / "_check_main.c"
     main_path.write_text(c_code)
+    cmd = [gcc, "-Wall", "-Werror", "-Wno-unused-function",
+           "-I", str(build_dir), "-c", "-o", "/dev/null", str(main_path)]
+    if llm.is_debug():
+        print(f"[DEBUG] GCC command: {' '.join(cmd)}", flush=True)
     try:
-        result = subprocess.run(
-            [gcc, "-Wall", "-Werror", "-Wno-unused-function",
-             "-I", str(build_dir), "-c", "-o", "/dev/null", str(main_path)],
-            capture_output=True, text=True, timeout=10,
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if llm.is_debug():
+            print(f"[DEBUG] GCC exit code: {result.returncode}", flush=True)
+            if result.stderr:
+                print(f"[DEBUG] GCC stderr:\n{result.stderr}", flush=True)
         if result.returncode == 0:
             return True, ""
         return False, result.stderr
@@ -738,6 +744,8 @@ def _generate_main_c_llm(build_dir: Path, components: list[str],
                           domains: dict[str, str], app_prompt: str) -> Path | None:
     """Generate main.c from app.prompt + component headers using LLM."""
     from . import llm
+
+    debug = llm.is_debug()
 
     # Collect component headers
     headers = {}
@@ -773,6 +781,11 @@ def _generate_main_c_llm(build_dir: Path, components: list[str],
         f"handle errors, and be a fully functional application — not a test harness."
     )
 
+    if debug:
+        print(f"[DEBUG] app.prompt ({len(app_prompt)} chars):\n{app_prompt}", flush=True)
+        print(f"[DEBUG] System prompt: {system_prompt}", flush=True)
+        print(f"[DEBUG] Full prompt ({len(prompt)} chars)", flush=True)
+
     max_retries = 2
     for attempt in range(1, max_retries + 2):
         print(f"  ⟳ Generating main.c via LLM (attempt {attempt})...", flush=True)
@@ -783,8 +796,15 @@ def _generate_main_c_llm(build_dir: Path, components: list[str],
             print(f"  ⚠ LLM returned empty response ({dt:.1f}s)")
             continue
 
+        if debug:
+            print(f"[DEBUG] Raw LLM response ({len(raw)} chars):\n{raw}", flush=True)
+
         print(f"  ✓ LLM responded ({dt:.1f}s), validating with GCC...")
         c_code = _extract_c_code(raw)
+
+        if debug and c_code != raw:
+            print(f"[DEBUG] Extracted C code ({len(c_code)} chars, differs from raw)", flush=True)
+
         ok, err = _gcc_check_main(c_code, build_dir, components)
         if ok:
             main_path = build_dir / "main.c"
@@ -793,6 +813,8 @@ def _generate_main_c_llm(build_dir: Path, components: list[str],
             return main_path
 
         print(f"  ⚠ GCC check failed (attempt {attempt})")
+        if debug:
+            print(f"[DEBUG] GCC errors:\n{err}", flush=True)
         if attempt <= max_retries:
             prompt = (
                 f"The previous main.c had compilation errors:\n{err}\n\n"
@@ -801,6 +823,8 @@ def _generate_main_c_llm(build_dir: Path, components: list[str],
                 f"AVAILABLE COMPONENT HEADERS:\n\n{all_headers}\n\n"
                 f"Generate a corrected main.c. Output ONLY C code."
             )
+            if debug:
+                print(f"[DEBUG] Retry prompt ({len(prompt)} chars)", flush=True)
 
     return None
 
@@ -952,6 +976,10 @@ def show_help(cmd: str):
     {cmd} --interactive                   Interactive mode
     {cmd} --help                          Show this help
 
+  Flags:
+    --debug       Show LLM prompts, raw responses, and GCC commands
+    --no-cache    Skip build cache, rebuild all components
+
   Templates: {', '.join(TEMPLATES)}
 
   LLM backends (auto-detected, or set P2B_BACKEND):
@@ -1018,21 +1046,36 @@ def main():
             sys.exit(1)
     elif sys.argv[1] == "build":
         check_dependencies()
+        debug = "--debug" in sys.argv
         no_cache = "--no-cache" in sys.argv
-        args = [a for a in sys.argv[2:] if a != "--no-cache"]
+        flags = ("--no-cache", "--debug")
+        args = [a for a in sys.argv[2:] if a not in flags]
         project_dir = args[0] if args else "."
+        if debug:
+            from . import llm
+            llm.set_debug(True)
         success = build_project(project_dir, no_cache=no_cache)
         sys.exit(0 if success else 1)
     elif sys.argv[1] == "run":
         check_dependencies()
+        debug = "--debug" in sys.argv
         no_cache = "--no-cache" in sys.argv
-        args = [a for a in sys.argv[2:] if a != "--no-cache"]
+        flags = ("--no-cache", "--debug")
+        args = [a for a in sys.argv[2:] if a not in flags]
         project_dir = args[0] if args else "."
+        if debug:
+            from . import llm
+            llm.set_debug(True)
         success = run_project(project_dir, no_cache=no_cache)
         sys.exit(0 if success else 1)
     else:
         check_dependencies()
-        intent = " ".join(sys.argv[1:])
+        debug = "--debug" in sys.argv
+        remaining = [a for a in sys.argv[1:] if a != "--debug"]
+        intent = " ".join(remaining)
+        if debug:
+            from . import llm
+            llm.set_debug(True)
         success, _ = compile_pipeline(intent)
         sys.exit(0 if success else 1)
 
