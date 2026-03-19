@@ -790,7 +790,7 @@ def _generate_main_c_llm(build_dir: Path, components: list[str],
     for attempt in range(1, max_retries + 2):
         print(f"  ⟳ Generating main.c via LLM (attempt {attempt})...", flush=True)
         t0 = time.monotonic()
-        raw = llm.generate(prompt, system_prompt, timeout=120)
+        raw = llm.generate(prompt, system_prompt)
         dt = time.monotonic() - t0
         if not raw:
             print(f"  ⚠ LLM returned empty response ({dt:.1f}s)")

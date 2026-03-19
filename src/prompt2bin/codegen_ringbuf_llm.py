@@ -101,7 +101,7 @@ def generate_ringbuf_llm(
     for attempt in range(1, max_retries + 2):
         if debug:
             print(f"[DEBUG] ringbuf codegen prompt ({len(prompt)} chars, attempt {attempt})", flush=True)
-        raw = llm.generate(prompt, SYSTEM_PROMPT, timeout=180)
+        raw = llm.generate(prompt, SYSTEM_PROMPT)
         if not raw:
             print(f"  LLM returned no output")
             return None

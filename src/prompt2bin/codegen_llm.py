@@ -130,7 +130,7 @@ def _call_llm(prompt: str, attempt: int = 1) -> str | None:
     from . import llm
     if llm.is_debug():
         print(f"[DEBUG] codegen_llm prompt ({len(prompt)} chars, attempt {attempt})", flush=True)
-    return llm.generate(prompt, SYSTEM_PROMPT, timeout=90)
+    return llm.generate(prompt, SYSTEM_PROMPT)
 
 
 def generate_c_llm(
