@@ -15,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
@@ -59,6 +61,7 @@ from .test_termio import run_termio_test
 
 # Project system
 from .project import load_project, ensure_build_dir, init_project, TEMPLATES
+from .cache import BuildCache, prompt_hash
 
 
 BANNER = """
@@ -256,13 +259,16 @@ def compile_pipeline(intent: str, output_dir: str = ".", name_override: str | No
 
 def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """Arena allocator pipeline."""
-    print("\n▸ Phase 1: Translating intent → formal spec...")
+    print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
+    t0 = time.monotonic()
     spec = intent_to_arena(intent)
     if name_override:
         spec.name = name_override
+    print(f"  ({time.monotonic() - t0:.1f}s)")
     print(spec.describe())
 
-    print("\n▸ Phase 2: Verifying spec with Z3...")
+    print("\n▸ Phase 2: Verifying spec with Z3...", flush=True)
+    t0 = time.monotonic()
     results = verify_arena(spec)
     all_passed = True
     for r in results:
@@ -276,10 +282,11 @@ def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
         return False
-    print(f"\n  All {len(results)} properties verified ✓")
+    print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
-    print("\n▸ Phase 3: Generating C code via LLM...")
+    print("\n▸ Phase 3: Generating C code via LLM...", flush=True)
+    t0 = time.monotonic()
     c_code = generate_arena_llm(spec, verified_properties=verified_props)
     codegen_source = "Claude"
 
@@ -292,11 +299,12 @@ def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source}, {time.monotonic() - t0:.1f}s)")
 
-    print("\n▸ Phase 3b: Running test harness...")
+    print("\n▸ Phase 3b: Running test harness...", flush=True)
+    t0 = time.monotonic()
     test_ok, test_msg = run_arena_test(spec, output_path)
-    print(f"  {test_msg}")
+    print(f"  {test_msg} ({time.monotonic() - t0:.1f}s)")
     if not test_ok and codegen_source == "Claude":
         print("  LLM code failed — falling back to template")
         c_code = generate_arena_template(spec)
@@ -313,13 +321,16 @@ def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None
 
 def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """Ring buffer pipeline."""
-    print("\n▸ Phase 1: Translating intent → formal spec...")
+    print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
+    t0 = time.monotonic()
     spec = intent_to_ringbuf(intent)
     if name_override:
         spec.name = name_override
+    print(f"  ({time.monotonic() - t0:.1f}s)")
     print(spec.describe())
 
-    print("\n▸ Phase 2: Verifying spec with Z3...")
+    print("\n▸ Phase 2: Verifying spec with Z3...", flush=True)
+    t0 = time.monotonic()
     results = verify_ringbuf_spec(spec)
     all_passed = True
     for r in results:
@@ -333,10 +344,11 @@ def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | No
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
         return False
-    print(f"\n  All {len(results)} properties verified ✓")
+    print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
-    print("\n▸ Phase 3: Generating C code via LLM...")
+    print("\n▸ Phase 3: Generating C code via LLM...", flush=True)
+    t0 = time.monotonic()
     c_code = generate_ringbuf_llm(spec, verified_properties=verified_props)
     codegen_source = "Claude"
 
@@ -348,11 +360,12 @@ def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | No
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source}, {time.monotonic() - t0:.1f}s)")
 
-    print("\n▸ Phase 3b: Running test harness...")
+    print("\n▸ Phase 3b: Running test harness...", flush=True)
+    t0 = time.monotonic()
     test_ok, test_msg = run_ringbuf_test(spec, output_path)
-    print(f"  {test_msg}")
+    print(f"  {test_msg} ({time.monotonic() - t0:.1f}s)")
     if not test_ok:
         print("  ⚠ Tests failed — code generated but may have issues")
 
@@ -362,13 +375,16 @@ def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | No
 
 def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """Process spawner pipeline."""
-    print("\n▸ Phase 1: Translating intent → formal spec...")
+    print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
+    t0 = time.monotonic()
     spec = intent_to_proc(intent)
     if name_override:
         spec.name = name_override
+    print(f"  ({time.monotonic() - t0:.1f}s)")
     print(spec.describe())
 
-    print("\n▸ Phase 2: Verifying spec with Z3...")
+    print("\n▸ Phase 2: Verifying spec with Z3...", flush=True)
+    t0 = time.monotonic()
     results = verify_proc_spec(spec)
     all_passed = True
     for r in results:
@@ -382,10 +398,11 @@ def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None 
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
         return False
-    print(f"\n  All {len(results)} properties verified ✓")
+    print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
-    print("\n▸ Phase 3: Generating C code via LLM...")
+    print("\n▸ Phase 3: Generating C code via LLM...", flush=True)
+    t0 = time.monotonic()
     c_code = generate_proc_llm(spec, verified_properties=verified_props)
     codegen_source = "Claude"
 
@@ -397,11 +414,12 @@ def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None 
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source}, {time.monotonic() - t0:.1f}s)")
 
-    print("\n▸ Phase 3b: Running test harness...")
+    print("\n▸ Phase 3b: Running test harness...", flush=True)
+    t0 = time.monotonic()
     test_ok, test_msg = run_proc_test(spec, output_path)
-    print(f"  {test_msg}")
+    print(f"  {test_msg} ({time.monotonic() - t0:.1f}s)")
     if not test_ok:
         print("  ⚠ Tests failed — code generated but may have issues")
 
@@ -411,13 +429,16 @@ def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None 
 
 def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """String table pipeline."""
-    print("\n▸ Phase 1: Translating intent → formal spec...")
+    print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
+    t0 = time.monotonic()
     spec = intent_to_strtab(intent)
     if name_override:
         spec.name = name_override
+    print(f"  ({time.monotonic() - t0:.1f}s)")
     print(spec.describe())
 
-    print("\n▸ Phase 2: Verifying spec with Z3...")
+    print("\n▸ Phase 2: Verifying spec with Z3...", flush=True)
+    t0 = time.monotonic()
     results = verify_strtab_spec(spec)
     all_passed = True
     for r in results:
@@ -431,10 +452,11 @@ def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | Non
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
         return False
-    print(f"\n  All {len(results)} properties verified ✓")
+    print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
-    print("\n▸ Phase 3: Generating C code via LLM...")
+    print("\n▸ Phase 3: Generating C code via LLM...", flush=True)
+    t0 = time.monotonic()
     c_code = generate_strtab_llm(spec, verified_properties=verified_props)
     codegen_source = "Claude"
 
@@ -446,11 +468,12 @@ def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | Non
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source}, {time.monotonic() - t0:.1f}s)")
 
-    print("\n▸ Phase 3b: Running test harness...")
+    print("\n▸ Phase 3b: Running test harness...", flush=True)
+    t0 = time.monotonic()
     test_ok, test_msg = run_strtab_test(spec, output_path)
-    print(f"  {test_msg}")
+    print(f"  {test_msg} ({time.monotonic() - t0:.1f}s)")
     if not test_ok:
         print("  ⚠ Tests failed — code generated but may have issues")
 
@@ -460,13 +483,16 @@ def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | Non
 
 def _compile_termio(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
     """Terminal I/O pipeline."""
-    print("\n▸ Phase 1: Translating intent → formal spec...")
+    print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
+    t0 = time.monotonic()
     spec = intent_to_termio(intent)
     if name_override:
         spec.name = name_override
+    print(f"  ({time.monotonic() - t0:.1f}s)")
     print(spec.describe())
 
-    print("\n▸ Phase 2: Verifying spec with Z3...")
+    print("\n▸ Phase 2: Verifying spec with Z3...", flush=True)
+    t0 = time.monotonic()
     results = verify_termio_spec(spec)
     all_passed = True
     for r in results:
@@ -480,10 +506,11 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
         return False
-    print(f"\n  All {len(results)} properties verified ✓")
+    print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
-    print("\n▸ Phase 3: Generating C code via LLM...")
+    print("\n▸ Phase 3: Generating C code via LLM...", flush=True)
+    t0 = time.monotonic()
     c_code = generate_termio_llm(spec, verified_properties=verified_props)
     codegen_source = "Claude"
 
@@ -495,11 +522,12 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
     with open(output_path, "w") as f:
         f.write(c_code)
     lines = c_code.count("\n")
-    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source})")
+    print(f"  Generated {lines} lines → {_relpath(output_path)} (via {codegen_source}, {time.monotonic() - t0:.1f}s)")
 
-    print("\n▸ Phase 3b: Running test harness...")
+    print("\n▸ Phase 3b: Running test harness...", flush=True)
+    t0 = time.monotonic()
     test_ok, test_msg = run_termio_test(spec, output_path)
-    print(f"  {test_msg}")
+    print(f"  {test_msg} ({time.monotonic() - t0:.1f}s)")
     if not test_ok:
         print("  ⚠ Tests failed — code generated but may have issues")
 
@@ -509,7 +537,8 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
 
 def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, output_dir="."):
     """Phase 4: Compile to assembly and machine code."""
-    print("\n▸ Phase 4: Compiling to assembly and machine code...")
+    print("\n▸ Phase 4: Compiling to assembly and machine code...", flush=True)
+    t0 = time.monotonic()
     asm_path, obj_path, err = compile_to_binary(c_code, name, domain, output_dir)
 
     if err:
@@ -519,6 +548,7 @@ def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, outpu
         obj_size = os.path.getsize(obj_path)
         print(f"  {_relpath(asm_path):30s} — {asm_size:>6,} bytes (assembly)")
         print(f"  {_relpath(obj_path):30s} — {obj_size:>6,} bytes (machine code)")
+        print(f"  ({time.monotonic() - t0:.1f}s)")
         show_assembly_highlights(asm_path, hot_func, hot_label)
 
     print(f"\n{'═' * 60}")
@@ -538,12 +568,22 @@ def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, outpu
 
 # ── Project build system ──
 
-def build_project(project_dir: str = ".") -> bool:
+def _build_one_component(comp_name, comp, build_dir):
+    """Build a single component. Returns (name, ok, domain)."""
+    ok, domain = compile_pipeline(
+        comp.prompt_text,
+        output_dir=str(build_dir),
+        name_override=comp_name,
+    )
+    return comp_name, ok, domain
+
+
+def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
     """
     Build all components defined in a project's build.toml.
 
     Reads each .prompt file, runs the full pipeline, outputs
-    all artifacts to build/.
+    all artifacts to build/.  Uses caching and parallel builds.
     """
     try:
         project = load_project(project_dir)
@@ -552,6 +592,8 @@ def build_project(project_dir: str = ".") -> bool:
         return False
 
     build_dir = ensure_build_dir(project)
+    cache = BuildCache(build_dir)
+    t_start = time.monotonic()
 
     print(f"\n{'═' * 60}")
     print(f"  prompt2bin build: {project.name}")
@@ -560,21 +602,52 @@ def build_project(project_dir: str = ".") -> bool:
     print(f"  Output: {_relpath(build_dir)}/")
     print(f"{'═' * 60}")
 
+    # ── Check cache for each component ──
+    cached = {}   # name → domain (restored from cache)
+    to_build = {} # name → ComponentConfig (needs rebuild)
+
+    for comp_name, comp in project.components.items():
+        if not no_cache:
+            h = prompt_hash(comp.prompt_text)
+            if cache.is_cached(comp_name, h):
+                domain = detect_domain(comp.prompt_text)
+                if cache.restore(comp_name, build_dir):
+                    cached[comp_name] = domain
+                    print(f"\n  ⚡ {comp_name}: unchanged, restored from cache")
+                    continue
+        to_build[comp_name] = comp
+
+    # ── Build changed components in parallel ──
     results = {}
     domains = {}
-    for comp_name, comp in project.components.items():
-        print(f"\n{'━' * 60}")
-        print(f"  Building component: {comp_name}")
-        print(f"  Prompt: {_relpath(comp.prompt_path)}")
-        print(f"{'━' * 60}")
 
-        ok, domain = compile_pipeline(
-            comp.prompt_text,
-            output_dir=str(build_dir),
-            name_override=comp_name,
-        )
-        results[comp_name] = ok
-        domains[comp_name] = domain
+    # Carry over cached results
+    for name, domain in cached.items():
+        results[name] = True
+        domains[name] = domain
+
+    if to_build:
+        n_parallel = len(to_build)
+        if n_parallel > 1:
+            print(f"\n  ▸ Building {n_parallel} components in parallel...")
+
+        with ThreadPoolExecutor(max_workers=min(n_parallel, 4)) as pool:
+            futures = {}
+            for comp_name, comp in to_build.items():
+                f = pool.submit(_build_one_component, comp_name, comp, build_dir)
+                futures[f] = comp_name
+
+            for f in as_completed(futures):
+                comp_name, ok, domain = f.result()
+                results[comp_name] = ok
+                domains[comp_name] = domain
+                # Cache successful builds
+                if ok:
+                    comp = to_build[comp_name]
+                    h = prompt_hash(comp.prompt_text)
+                    cache.store(comp_name, h, build_dir)
+
+    elapsed = time.monotonic() - t_start
 
     # ── Build summary ──
     passed = [k for k, v in results.items() if v]
@@ -582,12 +655,16 @@ def build_project(project_dir: str = ".") -> bool:
 
     print(f"\n{'═' * 60}")
     print(f"  BUILD {'COMPLETE' if not failed else 'FINISHED WITH ERRORS'}")
-    print(f"")
+    print(f"  Time: {elapsed:.1f}s", end="")
+    if cached:
+        print(f"  ({len(cached)} cached, {len(to_build)} built)", end="")
+    print()
 
     if passed:
         print(f"  ✓ Passed ({len(passed)}):")
         for name in passed:
-            print(f"      {name}.h  {name}.s  {name}.o")
+            tag = " (cached)" if name in cached else ""
+            print(f"      {name}.h  {name}.s  {name}.o{tag}")
     if failed:
         print(f"  ✗ Failed ({len(failed)}):")
         for name in failed:
@@ -685,18 +762,21 @@ def _generate_main_c_llm(build_dir: Path, components: list[str],
 
     max_retries = 2
     for attempt in range(1, max_retries + 2):
-        print(f"  ⟳ Generating main.c via LLM (attempt {attempt})...")
+        print(f"  ⟳ Generating main.c via LLM (attempt {attempt})...", flush=True)
+        t0 = time.monotonic()
         raw = llm.generate(prompt, system_prompt, timeout=120)
+        dt = time.monotonic() - t0
         if not raw:
-            print("  ⚠ LLM returned empty response")
+            print(f"  ⚠ LLM returned empty response ({dt:.1f}s)")
             continue
 
+        print(f"  ✓ LLM responded ({dt:.1f}s), validating with GCC...")
         c_code = _extract_c_code(raw)
         ok, err = _gcc_check_main(c_code, build_dir, components)
         if ok:
             main_path = build_dir / "main.c"
             main_path.write_text(c_code)
-            print("  ✓ main.c generated successfully")
+            print(f"  ✓ main.c generated successfully")
             return main_path
 
         print(f"  ⚠ GCC check failed (attempt {attempt})")
@@ -734,9 +814,9 @@ def generate_main_c(build_dir: Path, components: list[str], domains: dict[str, s
 
 
 
-def run_project(project_dir: str = ".") -> bool:
+def run_project(project_dir: str = ".", no_cache: bool = False) -> bool:
     """Build, compile main.c, and run."""
-    if not build_project(project_dir):
+    if not build_project(project_dir, no_cache=no_cache):
         return False
 
     project = load_project(project_dir)
@@ -853,8 +933,8 @@ def show_help(cmd: str):
 
   Usage:
     {cmd} init <name> [--template <t>]   Scaffold a new project
-    {cmd} build [dir]                     Build all components in a project
-    {cmd} run [dir]                       Build + compile + run
+    {cmd} build [dir] [--no-cache]         Build all components in a project
+    {cmd} run [dir] [--no-cache]           Build + compile + run
     {cmd} "<prompt>"                      One-shot: compile a single prompt
     {cmd} --interactive                   Interactive mode
     {cmd} --help                          Show this help
@@ -925,13 +1005,17 @@ def main():
             sys.exit(1)
     elif sys.argv[1] == "build":
         check_dependencies()
-        project_dir = sys.argv[2] if len(sys.argv) > 2 else "."
-        success = build_project(project_dir)
+        no_cache = "--no-cache" in sys.argv
+        args = [a for a in sys.argv[2:] if a != "--no-cache"]
+        project_dir = args[0] if args else "."
+        success = build_project(project_dir, no_cache=no_cache)
         sys.exit(0 if success else 1)
     elif sys.argv[1] == "run":
         check_dependencies()
-        project_dir = sys.argv[2] if len(sys.argv) > 2 else "."
-        success = run_project(project_dir)
+        no_cache = "--no-cache" in sys.argv
+        args = [a for a in sys.argv[2:] if a != "--no-cache"]
+        project_dir = args[0] if args else "."
+        success = run_project(project_dir, no_cache=no_cache)
         sys.exit(0 if success else 1)
     else:
         check_dependencies()
