@@ -15,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
@@ -59,6 +61,7 @@ from .test_termio import run_termio_test
 
 # Project system
 from .project import load_project, ensure_build_dir, init_project, TEMPLATES
+from .cache import BuildCache, prompt_hash
 
 
 BANNER = """
@@ -538,12 +541,22 @@ def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, outpu
 
 # ── Project build system ──
 
-def build_project(project_dir: str = ".") -> bool:
+def _build_one_component(comp_name, comp, build_dir):
+    """Build a single component. Returns (name, ok, domain)."""
+    ok, domain = compile_pipeline(
+        comp.prompt_text,
+        output_dir=str(build_dir),
+        name_override=comp_name,
+    )
+    return comp_name, ok, domain
+
+
+def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
     """
     Build all components defined in a project's build.toml.
 
     Reads each .prompt file, runs the full pipeline, outputs
-    all artifacts to build/.
+    all artifacts to build/.  Uses caching and parallel builds.
     """
     try:
         project = load_project(project_dir)
@@ -552,6 +565,8 @@ def build_project(project_dir: str = ".") -> bool:
         return False
 
     build_dir = ensure_build_dir(project)
+    cache = BuildCache(build_dir)
+    t_start = time.monotonic()
 
     print(f"\n{'═' * 60}")
     print(f"  prompt2bin build: {project.name}")
@@ -560,21 +575,52 @@ def build_project(project_dir: str = ".") -> bool:
     print(f"  Output: {_relpath(build_dir)}/")
     print(f"{'═' * 60}")
 
+    # ── Check cache for each component ──
+    cached = {}   # name → domain (restored from cache)
+    to_build = {} # name → ComponentConfig (needs rebuild)
+
+    for comp_name, comp in project.components.items():
+        if not no_cache:
+            h = prompt_hash(comp.prompt_text)
+            if cache.is_cached(comp_name, h):
+                domain = detect_domain(comp.prompt_text)
+                if cache.restore(comp_name, build_dir):
+                    cached[comp_name] = domain
+                    print(f"\n  ⚡ {comp_name}: unchanged, restored from cache")
+                    continue
+        to_build[comp_name] = comp
+
+    # ── Build changed components in parallel ──
     results = {}
     domains = {}
-    for comp_name, comp in project.components.items():
-        print(f"\n{'━' * 60}")
-        print(f"  Building component: {comp_name}")
-        print(f"  Prompt: {_relpath(comp.prompt_path)}")
-        print(f"{'━' * 60}")
 
-        ok, domain = compile_pipeline(
-            comp.prompt_text,
-            output_dir=str(build_dir),
-            name_override=comp_name,
-        )
-        results[comp_name] = ok
-        domains[comp_name] = domain
+    # Carry over cached results
+    for name, domain in cached.items():
+        results[name] = True
+        domains[name] = domain
+
+    if to_build:
+        n_parallel = len(to_build)
+        if n_parallel > 1:
+            print(f"\n  ▸ Building {n_parallel} components in parallel...")
+
+        with ThreadPoolExecutor(max_workers=min(n_parallel, 4)) as pool:
+            futures = {}
+            for comp_name, comp in to_build.items():
+                f = pool.submit(_build_one_component, comp_name, comp, build_dir)
+                futures[f] = comp_name
+
+            for f in as_completed(futures):
+                comp_name, ok, domain = f.result()
+                results[comp_name] = ok
+                domains[comp_name] = domain
+                # Cache successful builds
+                if ok:
+                    comp = to_build[comp_name]
+                    h = prompt_hash(comp.prompt_text)
+                    cache.store(comp_name, h, build_dir)
+
+    elapsed = time.monotonic() - t_start
 
     # ── Build summary ──
     passed = [k for k, v in results.items() if v]
@@ -582,12 +628,16 @@ def build_project(project_dir: str = ".") -> bool:
 
     print(f"\n{'═' * 60}")
     print(f"  BUILD {'COMPLETE' if not failed else 'FINISHED WITH ERRORS'}")
-    print(f"")
+    print(f"  Time: {elapsed:.1f}s", end="")
+    if cached:
+        print(f"  ({len(cached)} cached, {len(to_build)} built)", end="")
+    print()
 
     if passed:
         print(f"  ✓ Passed ({len(passed)}):")
         for name in passed:
-            print(f"      {name}.h  {name}.s  {name}.o")
+            tag = " (cached)" if name in cached else ""
+            print(f"      {name}.h  {name}.s  {name}.o{tag}")
     if failed:
         print(f"  ✗ Failed ({len(failed)}):")
         for name in failed:
@@ -734,9 +784,9 @@ def generate_main_c(build_dir: Path, components: list[str], domains: dict[str, s
 
 
 
-def run_project(project_dir: str = ".") -> bool:
+def run_project(project_dir: str = ".", no_cache: bool = False) -> bool:
     """Build, compile main.c, and run."""
-    if not build_project(project_dir):
+    if not build_project(project_dir, no_cache=no_cache):
         return False
 
     project = load_project(project_dir)
@@ -853,8 +903,8 @@ def show_help(cmd: str):
 
   Usage:
     {cmd} init <name> [--template <t>]   Scaffold a new project
-    {cmd} build [dir]                     Build all components in a project
-    {cmd} run [dir]                       Build + compile + run
+    {cmd} build [dir] [--no-cache]         Build all components in a project
+    {cmd} run [dir] [--no-cache]           Build + compile + run
     {cmd} "<prompt>"                      One-shot: compile a single prompt
     {cmd} --interactive                   Interactive mode
     {cmd} --help                          Show this help
@@ -925,13 +975,17 @@ def main():
             sys.exit(1)
     elif sys.argv[1] == "build":
         check_dependencies()
-        project_dir = sys.argv[2] if len(sys.argv) > 2 else "."
-        success = build_project(project_dir)
+        no_cache = "--no-cache" in sys.argv
+        args = [a for a in sys.argv[2:] if a != "--no-cache"]
+        project_dir = args[0] if args else "."
+        success = build_project(project_dir, no_cache=no_cache)
         sys.exit(0 if success else 1)
     elif sys.argv[1] == "run":
         check_dependencies()
-        project_dir = sys.argv[2] if len(sys.argv) > 2 else "."
-        success = run_project(project_dir)
+        no_cache = "--no-cache" in sys.argv
+        args = [a for a in sys.argv[2:] if a != "--no-cache"]
+        project_dir = args[0] if args else "."
+        success = run_project(project_dir, no_cache=no_cache)
         sys.exit(0 if success else 1)
     else:
         check_dependencies()
