@@ -12,6 +12,7 @@ myproject/
   build/                 ← generated output (gitignored)
 """
 
+import subprocess
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -272,5 +273,16 @@ def init_project(project_dir: str | Path, template: str | None = None) -> tuple[
     app_prompt = tmpl.get("app_prompt")
     if app_prompt:
         (project_dir / "app.prompt").write_text(app_prompt + "\n")
+
+    # Write .gitignore
+    (project_dir / ".gitignore").write_text("build/\n")
+
+    # Initialize git repo and create initial commit
+    subprocess.run(["git", "init"], cwd=project_dir, capture_output=True, check=True)
+    subprocess.run(["git", "add", "."], cwd=project_dir, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Initial commit from prompt2bin init"],
+        cwd=project_dir, capture_output=True, check=True,
+    )
 
     return project_dir.resolve(), template
