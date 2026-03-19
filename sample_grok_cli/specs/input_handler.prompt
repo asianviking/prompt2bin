@@ -1,1 +1,1 @@
-I need a terminal input handler for an interactive Grok CLI. Basic line input, 4096 byte max line length, 512 history entries for recalling previous prompts. If the read is interrupted by a signal (EINTR), return an indicator so the caller can exit cleanly.
+I need a terminal input handler for an interactive Grok CLI. Basic line input, 4096 byte max line length, 512 history entries for recalling previous prompts.
