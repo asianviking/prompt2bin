@@ -128,6 +128,8 @@ def _gcc_check(c_code: str) -> tuple[bool, str]:
 def _call_llm(prompt: str, attempt: int = 1) -> str | None:
     """Call LLM backend and return raw text output."""
     from . import llm
+    if llm.is_debug():
+        print(f"[DEBUG] codegen_llm prompt ({len(prompt)} chars, attempt {attempt})", flush=True)
     return llm.generate(prompt, SYSTEM_PROMPT, timeout=90)
 
 
@@ -142,12 +144,18 @@ def generate_c_llm(
     Returns the C code string if successful, None if all attempts fail.
     The caller should fall back to template codegen on None.
     """
+    from . import llm as _llm_mod
+    debug = _llm_mod.is_debug()
+
     prompt = _spec_to_prompt(spec, verified_properties)
 
     for attempt in range(1, max_retries + 2):
-        raw = _call_llm(prompt)
+        raw = _call_llm(prompt, attempt)
         if raw is None:
             return None
+
+        if debug:
+            print(f"[DEBUG] Raw LLM response ({len(raw)} chars):\n{raw[:500]}", flush=True)
 
         c_code = _extract_c_code(raw)
 
@@ -159,6 +167,8 @@ def generate_c_llm(
         # Retry with error feedback
         if attempt <= max_retries:
             print(f"  GCC rejected attempt {attempt}, retrying with error context...")
+            if debug:
+                print(f"[DEBUG] GCC errors:\n{err}", flush=True)
             prompt = (
                 f"Your previous C code had compilation errors:\n\n{err}\n\n"
                 f"Fix the errors and regenerate. {_spec_to_prompt(spec, verified_properties)}"
