@@ -235,9 +235,11 @@ def show_assembly_highlights(asm_path: str, func_name: str, label: str):
             print(f"    ... ({len(instructions) - 25} more)")
 
 
-def compile_pipeline(intent: str, output_dir: str = ".", name_override: str | None = None) -> tuple[bool, str]:
+def compile_pipeline(intent: str, output_dir: str = ".", name_override: str | None = None,
+                     oneshot: bool = False) -> tuple[bool, str, str | None]:
     """Full pipeline: intent → spec → verify → C code → assembly → binary.
-    Returns (success, domain)."""
+    Returns (success, domain, name).
+    Set oneshot=True to suppress phase 4 summary (phase 5 will produce the final output)."""
     print(f"\n{'─' * 60}")
     print(f"  INPUT: {intent}")
     print(f"{'─' * 60}")
@@ -246,19 +248,25 @@ def compile_pipeline(intent: str, output_dir: str = ".", name_override: str | No
     print(f"\n  Domain: {domain}")
 
     if domain == "ringbuf":
-        return _compile_ringbuf(intent, output_dir, name_override), domain
+        ok, name = _compile_ringbuf(intent, output_dir, name_override, oneshot=oneshot)
+        return ok, domain, name
     elif domain == "proc":
-        return _compile_proc(intent, output_dir, name_override), domain
+        ok, name = _compile_proc(intent, output_dir, name_override, oneshot=oneshot)
+        return ok, domain, name
     elif domain == "strtab":
-        return _compile_strtab(intent, output_dir, name_override), domain
+        ok, name = _compile_strtab(intent, output_dir, name_override, oneshot=oneshot)
+        return ok, domain, name
     elif domain == "termio":
-        return _compile_termio(intent, output_dir, name_override), domain
+        ok, name = _compile_termio(intent, output_dir, name_override, oneshot=oneshot)
+        return ok, domain, name
     else:
-        return _compile_arena(intent, output_dir, name_override), domain
+        ok, name = _compile_arena(intent, output_dir, name_override, oneshot=oneshot)
+        return ok, domain, name
 
 
-def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
-    """Arena allocator pipeline."""
+def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None = None,
+                   oneshot: bool = False) -> tuple[bool, str | None]:
+    """Arena allocator pipeline. Returns (success, name)."""
     print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
     t0 = time.monotonic()
     spec = intent_to_arena(intent)
@@ -281,7 +289,7 @@ def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None
         for r in results:
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
-        return False
+        return False, None
     print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
@@ -316,11 +324,12 @@ def _compile_arena(intent: str, output_dir: str = ".", name_override: str | None
         print(f"  {test_msg}")
 
     return _phase4(c_code, spec.name, output_path, lines, "arena",
-                   "_force_alloc", f"{spec.name}_alloc", output_dir)
+                   "_force_alloc", f"{spec.name}_alloc", output_dir, summary=not oneshot)
 
 
-def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
-    """Ring buffer pipeline."""
+def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | None = None,
+                     oneshot: bool = False) -> tuple[bool, str | None]:
+    """Ring buffer pipeline. Returns (success, name)."""
     print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
     t0 = time.monotonic()
     spec = intent_to_ringbuf(intent)
@@ -343,7 +352,7 @@ def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | No
         for r in results:
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
-        return False
+        return False, None
     print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
@@ -354,7 +363,7 @@ def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | No
 
     if c_code is None:
         print("  ✗ LLM codegen failed and no template fallback for ring buffers.")
-        return False
+        return False, None
 
     output_path = os.path.join(output_dir, f"{spec.name}.h")
     with open(output_path, "w") as f:
@@ -370,11 +379,12 @@ def _compile_ringbuf(intent: str, output_dir: str = ".", name_override: str | No
         print("  ⚠ Tests failed — code generated but may have issues")
 
     return _phase4(c_code, spec.name, output_path, lines, "ringbuf",
-                   "_force_push", f"{spec.name}_push", output_dir)
+                   "_force_push", f"{spec.name}_push", output_dir, summary=not oneshot)
 
 
-def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
-    """Process spawner pipeline."""
+def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None = None,
+                  oneshot: bool = False) -> tuple[bool, str | None]:
+    """Process spawner pipeline. Returns (success, name)."""
     print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
     t0 = time.monotonic()
     spec = intent_to_proc(intent)
@@ -397,7 +407,7 @@ def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None 
         for r in results:
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
-        return False
+        return False, None
     print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
@@ -408,7 +418,7 @@ def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None 
 
     if c_code is None:
         print("  ✗ LLM codegen failed and no template fallback for process spawner.")
-        return False
+        return False, None
 
     output_path = os.path.join(output_dir, f"{spec.name}.h")
     with open(output_path, "w") as f:
@@ -424,11 +434,12 @@ def _compile_proc(intent: str, output_dir: str = ".", name_override: str | None 
         print("  ⚠ Tests failed — code generated but may have issues")
 
     return _phase4(c_code, spec.name, output_path, lines, "proc",
-                   "_force_exec", f"{spec.name}_exec", output_dir)
+                   "_force_exec", f"{spec.name}_exec", output_dir, summary=not oneshot)
 
 
-def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
-    """String table pipeline."""
+def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | None = None,
+                    oneshot: bool = False) -> tuple[bool, str | None]:
+    """String table pipeline. Returns (success, name)."""
     print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
     t0 = time.monotonic()
     spec = intent_to_strtab(intent)
@@ -451,7 +462,7 @@ def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | Non
         for r in results:
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
-        return False
+        return False, None
     print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
@@ -462,7 +473,7 @@ def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | Non
 
     if c_code is None:
         print("  ✗ LLM codegen failed and no template fallback for string table.")
-        return False
+        return False, None
 
     output_path = os.path.join(output_dir, f"{spec.name}.h")
     with open(output_path, "w") as f:
@@ -478,11 +489,12 @@ def _compile_strtab(intent: str, output_dir: str = ".", name_override: str | Non
         print("  ⚠ Tests failed — code generated but may have issues")
 
     return _phase4(c_code, spec.name, output_path, lines, "strtab",
-                   "_force_intern", f"{spec.name}_intern", output_dir)
+                   "_force_intern", f"{spec.name}_intern", output_dir, summary=not oneshot)
 
 
-def _compile_termio(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
-    """Terminal I/O pipeline."""
+def _compile_termio(intent: str, output_dir: str = ".", name_override: str | None = None,
+                    oneshot: bool = False) -> tuple[bool, str | None]:
+    """Terminal I/O pipeline. Returns (success, name)."""
     print("\n▸ Phase 1: Translating intent → formal spec...", flush=True)
     t0 = time.monotonic()
     spec = intent_to_termio(intent)
@@ -505,7 +517,7 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
         for r in results:
             if not r.passed:
                 print(f"    - {r.property_name}: {r.message}")
-        return False
+        return False, None
     print(f"\n  All {len(results)} properties verified ✓ ({time.monotonic() - t0:.1f}s)")
 
     verified_props = [r.message for r in results if r.passed]
@@ -516,7 +528,7 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
 
     if c_code is None:
         print("  ✗ LLM codegen failed and no template fallback for terminal I/O.")
-        return False
+        return False, None
 
     output_path = os.path.join(output_dir, f"{spec.name}.h")
     with open(output_path, "w") as f:
@@ -532,11 +544,12 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
         print("  ⚠ Tests failed — code generated but may have issues")
 
     return _phase4(c_code, spec.name, output_path, lines, "termio",
-                   "_force_readline", f"{spec.name}_readline", output_dir)
+                   "_force_readline", f"{spec.name}_readline", output_dir, summary=not oneshot)
 
 
-def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, output_dir="."):
-    """Phase 4: Compile to assembly and machine code."""
+def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, output_dir=".", summary=True):
+    """Phase 4: Compile to assembly and machine code.
+    Returns (success, name).  Set summary=False to suppress the final artifact listing."""
     print("\n▸ Phase 4: Compiling to assembly and machine code...", flush=True)
     t0 = time.monotonic()
     asm_path, obj_path, err = compile_to_binary(c_code, name, domain, output_dir)
@@ -551,17 +564,132 @@ def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, outpu
         print(f"  ({time.monotonic() - t0:.1f}s)")
         show_assembly_highlights(asm_path, hot_func, hot_label)
 
+    if summary:
+        print(f"\n{'═' * 60}")
+        print(f"  ✓ Complete pipeline: English → verified machine code")
+        print(f"")
+        print(f"    {_relpath(output_path):30s}  C code ({lines} lines)")
+        if asm_path:
+            print(f"    {_relpath(asm_path):30s}  x86-64 assembly")
+        if obj_path:
+            print(f"    {_relpath(obj_path):30s}  machine code (linkable)")
+        print(f"")
+        print(f"    Link into your program:")
+        print(f"      #include \"{os.path.basename(output_path)}\"")
+        print(f"{'═' * 60}\n")
+    return True, name
+
+
+def _phase5_executable(name: str, domain: str, intent: str, output_dir: str = ".") -> bool:
+    """Phase 5: Generate main.c, link into executable, clean up intermediates."""
+    from . import llm
+
+    debug = llm.is_debug()
+    header_path = os.path.join(output_dir, f"{name}.h")
+    if not os.path.exists(header_path):
+        print(f"  ✗ Header not found: {_relpath(header_path)}")
+        return False
+
+    header_code = open(header_path).read()
+
+    print("\n▸ Phase 5: Generating main.c and linking executable...", flush=True)
+    t0 = time.monotonic()
+
+    system_prompt = (
+        "You generate C source files (main.c). Output ONLY valid C code. "
+        "No markdown fences, no explanation, no commentary. "
+        "The code must compile with GCC -Wall -Werror. "
+        "Include all necessary standard headers. "
+        "Use the component API exactly as declared in the provided header."
+    )
+
+    prompt = (
+        f"Generate a complete main.c file for this application:\n\n"
+        f"APPLICATION DESCRIPTION:\n{intent}\n\n"
+        f"COMPONENT HEADER (include with #include \"{name}.h\"):\n\n"
+        f"=== {name}.h (domain: {domain}) ===\n{header_code}\n\n"
+        f"Generate a main.c that implements a fully working application as described above, "
+        f"using the component API from the header. The code should be production-quality, "
+        f"handle errors, and be a complete, runnable program — not a test harness or demo."
+    )
+
+    gcc = shutil.which("gcc")
+    if not gcc:
+        print("  ✗ gcc not found")
+        return False
+
+    build_dir = Path(output_dir)
+    max_retries = 2
+    main_c_code = None
+
+    for attempt in range(1, max_retries + 2):
+        print(f"  ⟳ Generating main.c via LLM (attempt {attempt})...", flush=True)
+        raw = llm.generate(prompt, system_prompt)
+        if not raw:
+            print("  ⚠ LLM returned empty response")
+            continue
+
+        c_code = _extract_c_code(raw)
+
+        # Validate with GCC
+        ok, err = _gcc_check_main(c_code, build_dir, [name])
+        if ok:
+            main_c_code = c_code
+            break
+
+        print(f"  ⚠ GCC check failed (attempt {attempt})")
+        if debug:
+            print(f"[DEBUG] GCC errors:\n{err}", flush=True)
+        if attempt <= max_retries:
+            prompt = (
+                f"The previous main.c had compilation errors:\n{err}\n\n"
+                f"Fix the errors. Here is the original request:\n\n"
+                f"APPLICATION DESCRIPTION:\n{intent}\n\n"
+                f"COMPONENT HEADER:\n\n=== {name}.h (domain: {domain}) ===\n{header_code}\n\n"
+                f"Generate a corrected main.c. Output ONLY C code."
+            )
+
+    if main_c_code is None:
+        print("  ✗ Failed to generate valid main.c")
+        return False
+
+    # Write main.c, compile, link
+    main_path = os.path.join(output_dir, "main.c")
+    with open(main_path, "w") as f:
+        f.write(main_c_code)
+
+    binary_path = os.path.join(output_dir, name)
+    compile_cmd = [
+        gcc, "-o", binary_path,
+        main_path,
+        f"-I{output_dir}",
+        "-lpthread",
+    ]
+
+    result = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=15)
+    if result.returncode != 0:
+        print(f"  ✗ Linking failed:\n{result.stderr}")
+        return False
+
+    dt = time.monotonic() - t0
+    binary_size = os.path.getsize(binary_path)
+
+    # Clean up intermediates
+    for ext in (".h", ".s", ".o"):
+        p = os.path.join(output_dir, f"{name}{ext}")
+        if os.path.exists(p):
+            os.unlink(p)
+    if os.path.exists(main_path):
+        os.unlink(main_path)
+
+    print(f"  ✓ Linked executable ({dt:.1f}s)")
     print(f"\n{'═' * 60}")
-    print(f"  ✓ Complete pipeline: English → verified machine code")
+    print(f"  ✓ Complete pipeline: English → executable binary")
     print(f"")
-    print(f"    {_relpath(output_path):30s}  C code ({lines} lines)")
-    if asm_path:
-        print(f"    {_relpath(asm_path):30s}  x86-64 assembly")
-    if obj_path:
-        print(f"    {_relpath(obj_path):30s}  machine code (linkable)")
+    print(f"    ./{_relpath(binary_path):30s}  {binary_size:>6,} bytes")
     print(f"")
-    print(f"    Link into your program:")
-    print(f"      #include \"{os.path.basename(output_path)}\"")
+    print(f"    Run it:")
+    print(f"      ./{name}")
     print(f"{'═' * 60}\n")
     return True
 
@@ -570,7 +698,7 @@ def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, outpu
 
 def _build_one_component(comp_name, comp, build_dir):
     """Build a single component. Returns (name, ok, domain)."""
-    ok, domain = compile_pipeline(
+    ok, domain, _name = compile_pipeline(
         comp.prompt_text,
         output_dir=str(build_dir),
         name_override=comp_name,
@@ -1076,7 +1204,9 @@ def main():
         if debug:
             from . import llm
             llm.set_debug(True)
-        success, _ = compile_pipeline(intent)
+        success, domain, name = compile_pipeline(intent, oneshot=True)
+        if success and name:
+            success = _phase5_executable(name, domain, intent)
         sys.exit(0 if success else 1)
 
 
