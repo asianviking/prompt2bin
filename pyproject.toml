@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prompt2bin"
-version = "0.3.2"
+version = "0.3.3"
 description = "From natural language to verified machine code"
 readme = "README.md"
 license = "MIT"
