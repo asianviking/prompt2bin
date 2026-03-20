@@ -133,6 +133,16 @@ page_size=100, min_align=3  (bad spec)
 → [FAIL] power_of_two → Code generation blocked.
 ```
 
+## AI skill
+
+prompt2bin ships an agent skill so AI coding assistants (Claude Code, Codex, Cursor, etc.) understand `.prompt` files and the framework:
+
+```bash
+npx skills add asianviking/prompt2bin
+```
+
+This teaches your agent how to write `.prompt` files, scaffold projects, debug verification failures, and use the full CLI.
+
 ## License
 
 MIT
