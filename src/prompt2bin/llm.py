@@ -235,8 +235,7 @@ def _codex_model_args() -> list[str]:
     if _model_config:
         if _model_config.name:
             args += ["--model", _model_config.name]
-        if _model_config.reasoning:
-            args += ["--reasoning-effort", _model_config.reasoning]
+        # reasoning_effort not supported by codex CLI — use extra_args if needed
         if _model_config.extra_args:
             args += list(_model_config.extra_args)
     return args
