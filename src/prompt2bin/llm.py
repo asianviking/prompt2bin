@@ -225,6 +225,13 @@ def _claude_generate(prompt: str, system_prompt: str, timeout: int | None = None
 
 # ── Codex CLI backend ──
 
+def _extra_cli_args() -> list[str]:
+    """Get extra CLI args from build.toml [model] extra_args."""
+    if _model_config and _model_config.extra_args:
+        return list(_model_config.extra_args)
+    return []
+
+
 def _codex_with_instructions(system_prompt: str) -> tuple[str | None, str | None]:
     """
     Write system prompt to a temp file for Codex CLI's -c flag.
@@ -258,6 +265,7 @@ def _codex_structured(prompt: str, system_prompt: str, json_schema: str, timeout
             [
                 codex_bin, "exec",
                 "--json",
+                *_extra_cli_args(),
                 "-c", f"model_instructions_file={instructions_path}",
                 full_prompt,
             ],
@@ -328,6 +336,7 @@ def _codex_generate(prompt: str, system_prompt: str, timeout: int | None = None)
         result = subprocess.run(
             [
                 codex_bin, "exec",
+                *_extra_cli_args(),
                 "-c", f"model_instructions_file={instructions_path}",
                 prompt,
             ],

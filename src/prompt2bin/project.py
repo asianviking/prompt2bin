@@ -25,6 +25,7 @@ class ModelConfig:
     name: str | None = None          # model ID (e.g. claude-sonnet-4-6, gpt-4o)
     reasoning: str | None = None     # low, medium, high — ignored if backend doesn't support it
     temperature: float | None = None
+    extra_args: list[str] = field(default_factory=list)  # extra CLI args for claude/codex backends
 
 
 @dataclass
@@ -76,6 +77,7 @@ def load_project(project_dir: str | Path = ".") -> ProjectConfig:
         name=raw_model.get("name"),
         reasoning=raw_model.get("reasoning"),
         temperature=raw_model.get("temperature"),
+        extra_args=raw_model.get("extra_args", []),
     )
     if model.reasoning and model.reasoning not in ("low", "medium", "high"):
         raise ValueError(
