@@ -114,7 +114,7 @@ def get_model_info() -> dict[str, str]:
     elif backend == "openai-api":
         info["model"] = _get_model("P2B_OPENAI_MODEL", "gpt-4o-mini")
     elif backend == "codex":
-        info["model"] = "codex"
+        info["model"] = _model_config.name if _model_config and _model_config.name else "codex (default)"
 
     if _model_config:
         if _model_config.reasoning:
@@ -141,6 +141,7 @@ def _claude_structured(prompt: str, system_prompt: str, json_schema: str, timeou
         _dbg("Claude CLI not found")
         return None
 
+    extra = _model_config.extra_args if _model_config and _model_config.extra_args else []
     cmd = [
         claude_bin, "-p",
         "--output-format", "json",
@@ -148,6 +149,7 @@ def _claude_structured(prompt: str, system_prompt: str, json_schema: str, timeou
         "--json-schema", json_schema,
         "--tools", "",
         "--model", _claude_model_arg(),
+        *extra,
         prompt,
     ]
     _dbg(f"Command: {' '.join(cmd[:8])}... <prompt>")
@@ -193,11 +195,13 @@ def _claude_generate(prompt: str, system_prompt: str, timeout: int | None = None
         _dbg("Claude CLI not found")
         return None
 
+    extra = _model_config.extra_args if _model_config and _model_config.extra_args else []
     cmd = [
         claude_bin, "-p",
         "--system-prompt", system_prompt,
         "--tools", "",
         "--model", _claude_model_arg(),
+        *extra,
         prompt,
     ]
     _dbg(f"Command: {' '.join(cmd[:8])}... <prompt>")
@@ -225,11 +229,17 @@ def _claude_generate(prompt: str, system_prompt: str, timeout: int | None = None
 
 # ── Codex CLI backend ──
 
-def _extra_cli_args() -> list[str]:
-    """Get extra CLI args from build.toml [model] extra_args."""
-    if _model_config and _model_config.extra_args:
-        return list(_model_config.extra_args)
-    return []
+def _codex_model_args() -> list[str]:
+    """Build codex CLI args from build.toml [model] settings."""
+    args: list[str] = []
+    if _model_config:
+        if _model_config.name:
+            args += ["--model", _model_config.name]
+        if _model_config.reasoning:
+            args += ["--reasoning-effort", _model_config.reasoning]
+        if _model_config.extra_args:
+            args += list(_model_config.extra_args)
+    return args
 
 
 def _codex_with_instructions(system_prompt: str) -> tuple[str | None, str | None]:
@@ -265,7 +275,7 @@ def _codex_structured(prompt: str, system_prompt: str, json_schema: str, timeout
             [
                 codex_bin, "exec",
                 "--json",
-                *_extra_cli_args(),
+                *_codex_model_args(),
                 "-c", f"model_instructions_file={instructions_path}",
                 full_prompt,
             ],
@@ -336,7 +346,7 @@ def _codex_generate(prompt: str, system_prompt: str, timeout: int | None = None)
         result = subprocess.run(
             [
                 codex_bin, "exec",
-                *_extra_cli_args(),
+                *_codex_model_args(),
                 "-c", f"model_instructions_file={instructions_path}",
                 prompt,
             ],
