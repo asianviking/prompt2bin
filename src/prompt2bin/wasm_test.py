@@ -68,7 +68,10 @@ def _invoke_test(
 ) -> TestResult:
     """Invoke a single test case via wasmtime."""
     args = [str(_typed_value_to_arg(a)) for a in test.args]
-    cmd = [wasmtime, "run", "--invoke", test.function, wasm_path] + args
+    cmd = [wasmtime, "run"]
+    if wasm_path.endswith(".cwasm"):
+        cmd.append("--allow-precompiled")
+    cmd.extend(["--invoke", test.function, wasm_path] + args)
 
     try:
         result = subprocess.run(

@@ -158,6 +158,36 @@ def optimize_wasm(wasm_path: str) -> tuple[bool, str | None]:
         return True, None  # wasm-opt disappeared between check and exec
 
 
+def compile_wasm_native(wasm_path: str, output_path: str | None = None) -> tuple[bool, str | None, str | None]:
+    """
+    AOT-compile a .wasm module to a native binary via `wasmtime compile`.
+
+    Produces a .cwasm file that can be executed directly by wasmtime
+    (much faster startup, native code).
+
+    Returns (success, output_path, error_message).
+    """
+    tc = toolchain.detect()
+    if not tc.wasmtime:
+        return False, None, "wasmtime not found"
+
+    if output_path is None:
+        output_path = wasm_path.replace(".wasm", ".cwasm")
+
+    try:
+        result = subprocess.run(
+            [tc.wasmtime, "compile", wasm_path, "-o", output_path],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            return False, None, result.stderr.strip()
+        return True, output_path, None
+    except subprocess.TimeoutExpired:
+        return False, None, "wasmtime compile timed out"
+    except FileNotFoundError:
+        return False, None, "wasmtime binary not found at execution time"
+
+
 def _safe_remove(path: str) -> None:
     try:
         os.unlink(path)

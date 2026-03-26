@@ -68,7 +68,7 @@ def load_project(project_dir: str | Path = ".") -> ProjectConfig:
     # Parse [project] section
     proj = raw.get("project", {})
     name = proj.get("name", project_dir.name)
-    target = proj.get("target", "x86-64-linux")
+    target = proj.get("target", "wasm")
 
     # Parse [model] section (all fields optional)
     raw_model = raw.get("model", {})

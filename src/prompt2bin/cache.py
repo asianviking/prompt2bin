@@ -22,10 +22,15 @@ import shutil
 from pathlib import Path
 
 
-# Artifact extensions by target
+# Required artifact extensions by target (must all exist for cache hit)
 ARTIFACT_EXTS = {
     "x86-64-linux": (".h", ".s", ".o"),
     "wasm": (".wat", ".wasm"),
+}
+
+# Optional artifacts that get cached if present (not required for cache hit)
+OPTIONAL_EXTS = {
+    "wasm": (".cwasm",),
 }
 
 # Legacy default (backwards compat for callers that don't pass target)
@@ -47,6 +52,9 @@ class BuildCache:
 
     def _exts(self) -> tuple[str, ...]:
         return ARTIFACT_EXTS.get(self.target, ARTIFACT_EXTS[DEFAULT_TARGET])
+
+    def _optional_exts(self) -> tuple[str, ...]:
+        return OPTIONAL_EXTS.get(self.target, ())
 
     def _comp_dir(self, name: str) -> Path:
         return self.cache_dir / name
@@ -87,6 +95,11 @@ class BuildCache:
                 src = comp_dir / f"{name}{ext}"
                 dst = build_dir / f"{name}{ext}"
                 shutil.copy2(str(src), str(dst))
+            # Also restore optional artifacts if present
+            for ext in self._optional_exts():
+                src = comp_dir / f"{name}{ext}"
+                if src.exists():
+                    shutil.copy2(str(src), str(build_dir / f"{name}{ext}"))
             return True
         except OSError:
             return False
@@ -95,7 +108,7 @@ class BuildCache:
         """Cache artifacts from build dir."""
         comp_dir = self._comp_dir(name)
         comp_dir.mkdir(parents=True, exist_ok=True)
-        for ext in self._exts():
+        for ext in (*self._exts(), *self._optional_exts()):
             src = build_dir / f"{name}{ext}"
             if src.exists():
                 shutil.copy2(str(src), str(comp_dir / f"{name}{ext}"))
