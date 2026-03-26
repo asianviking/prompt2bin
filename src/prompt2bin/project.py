@@ -145,6 +145,7 @@ def ensure_build_dir(project: ProjectConfig) -> Path:
 TEMPLATES = {
     "starter": {
         "description": "A memory pool and a message queue — the simplest demo",
+        "target": "x86-64-linux",
         "app_prompt": (
             "Interactive demo that allocates objects and passes messages.\n"
             "- Allocate several small objects (16, 32, 64 bytes) from memory_pool\n"
@@ -165,8 +166,24 @@ TEMPLATES = {
             ),
         },
     },
+    "wasm-starter": {
+        "description": "A bump allocator and a stack — wasm starter project",
+        "target": "wasm",
+        "components": {
+            "bump_alloc": (
+                "I need a bump allocator with 4KB capacity and 16-byte alignment. "
+                "Functions: alloc(size) -> offset, reset(), used() -> bytes_used."
+            ),
+            "stack": (
+                "I need a stack data structure for i32 values. "
+                "64 slots max. Functions: push(value), pop() -> value, "
+                "peek() -> value, size() -> count, is_empty() -> bool."
+            ),
+        },
+    },
     "grok-cli": {
         "description": "Grok CLI — xAI API via curl, context store, terminal I/O, response buffer",
+        "target": "x86-64-linux",
         "app_prompt": (
             "Interactive CLI for the xAI Grok API.\n"
             "- Read user input via input_handler (show \"grok> \" prompt, quit on \"quit\" or EOF)\n"
@@ -235,11 +252,13 @@ def _pick_template_interactive() -> str:
         print(f"    Enter 1-{len(templates)} or a template name.")
 
 
-def init_project(project_dir: str | Path, template: str | None = None) -> tuple[Path, str]:
+def init_project(project_dir: str | Path, template: str | None = None,
+                  target: str | None = None) -> tuple[Path, str]:
     """
     Scaffold a new prompt2bin project.
 
     Returns (project_path, template_name).
+    If target is given, it overrides the template's default target.
     """
     project_dir = Path(project_dir)
 
@@ -247,7 +266,11 @@ def init_project(project_dir: str | Path, template: str | None = None) -> tuple[
         raise FileExistsError(f"build.toml already exists in {project_dir}")
 
     if template is None:
-        template = _pick_template_interactive()
+        # If target=wasm and no template specified, default to wasm-starter
+        if target == "wasm":
+            template = "wasm-starter"
+        else:
+            template = _pick_template_interactive()
 
     if template not in TEMPLATES:
         raise ValueError(f"Unknown template: {template}. Available: {', '.join(TEMPLATES)}")
@@ -255,13 +278,16 @@ def init_project(project_dir: str | Path, template: str | None = None) -> tuple[
     tmpl = TEMPLATES[template]
     components = tmpl["components"]
 
+    # Resolve target: explicit param > template default > x86-64-linux
+    resolved_target = target or tmpl.get("target", "x86-64-linux")
+
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "specs").mkdir(exist_ok=True)
 
     name = project_dir.resolve().name
 
     # Write build.toml
-    lines = [f'[project]\nname = "{name}"\ntarget = "x86-64-linux"\n']
+    lines = [f'[project]\nname = "{name}"\ntarget = "{resolved_target}"\n']
     for comp_name in components:
         lines.append(f"[components.{comp_name}]")
         lines.append(f'prompt = "specs/{comp_name}.prompt"\n')
