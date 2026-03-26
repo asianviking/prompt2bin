@@ -63,7 +63,7 @@ from .test_termio import run_termio_test
 from .wasm_intent import intent_to_wasm_spec
 from .wasm_verify import verify_wasm_spec
 from .wasm_codegen import generate_wat
-from .wasm_validate import compile_wat_to_wasm, check_size_budget, optimize_wasm
+from .wasm_validate import compile_wat_to_wasm, check_size_budget, optimize_wasm, compile_wasm_native
 from .wasm_test import run_wasm_tests
 from . import toolchain
 
@@ -650,6 +650,19 @@ def _compile_wasm(intent: str, output_dir: str = ".", name_override: str | None 
 
     print(f"  ({time.monotonic() - t0:.1f}s)")
 
+    # Phase 4b: AOT compile to native via wasmtime compile
+    cwasm_path = os.path.join(output_dir, f"{spec.name}.cwasm")
+    aot_ok = False
+    print("\n▸ Phase 4b: AOT compiling → native binary...", flush=True)
+    t0 = time.monotonic()
+    aot_ok, _, aot_err = compile_wasm_native(wasm_path, cwasm_path)
+    if aot_ok:
+        cwasm_size = os.path.getsize(cwasm_path)
+        print(f"  {_relpath(cwasm_path):30s} — {cwasm_size:>6,} bytes (native)")
+    else:
+        print(f"  ⚠ AOT compile skipped: {aot_err}")
+    print(f"  ({time.monotonic() - t0:.1f}s)")
+
     # Phase 5: Run tests
     if spec.tests:
         print("\n▸ Phase 5: Running wasmtime tests...", flush=True)
@@ -669,19 +682,33 @@ def _compile_wasm(intent: str, output_dir: str = ".", name_override: str | None 
 
     # Summary
     print(f"\n{'═' * 60}")
-    print(f"  ✓ Complete pipeline: English → verified wasm binary")
+    if aot_ok:
+        print(f"  ✓ Complete pipeline: English → verified native binary (via wasm)")
+    else:
+        print(f"  ✓ Complete pipeline: English → verified wasm binary")
     print(f"")
     print(f"    {_relpath(wat_path):30s}  WAT source ({wat_code.count(chr(10))} lines)")
     print(f"    {_relpath(wasm_path):30s}  wasm binary ({wasm_size:,} bytes)")
+    if aot_ok:
+        print(f"    {_relpath(cwasm_path):30s}  native binary ({cwasm_size:,} bytes)")
     print(f"")
     print(f"    Run it:")
-    for func in spec.functions:
-        if func.params:
-            args = " ".join("0" for _ in func.params)
-            print(f"      wasmtime run --invoke {func.name} {spec.name}.wasm {args}")
-        else:
-            print(f"      wasmtime run --invoke {func.name} {spec.name}.wasm")
-        break  # Just show the first function as example
+    if aot_ok:
+        for func in spec.functions:
+            if func.params:
+                args = " ".join("0" for _ in func.params)
+                print(f"      wasmtime run --allow-precompiled --invoke {func.name} {spec.name}.cwasm {args}")
+            else:
+                print(f"      wasmtime run --allow-precompiled --invoke {func.name} {spec.name}.cwasm")
+            break
+    else:
+        for func in spec.functions:
+            if func.params:
+                args = " ".join("0" for _ in func.params)
+                print(f"      wasmtime run --invoke {func.name} {spec.name}.wasm {args}")
+            else:
+                print(f"      wasmtime run --invoke {func.name} {spec.name}.wasm")
+            break
     print(f"{'═' * 60}\n")
 
     return True
@@ -837,7 +864,7 @@ def _phase5_executable(name: str, domain: str, intent: str, output_dir: str = ".
 # ── Project build system ──
 
 def _build_one_component(comp_name, comp, build_dir):
-    """Build a single component. Returns (name, ok, domain)."""
+    """Build a single x86-64 component. Returns (name, ok, domain)."""
     ok, domain, _name = compile_pipeline(
         comp.prompt_text,
         output_dir=str(build_dir),
@@ -846,12 +873,23 @@ def _build_one_component(comp_name, comp, build_dir):
     return comp_name, ok, domain
 
 
+def _build_one_wasm_component(comp_name, comp, build_dir):
+    """Build a single wasm component. Returns (name, ok)."""
+    ok = _compile_wasm(
+        comp.prompt_text,
+        output_dir=str(build_dir),
+        name_override=comp_name,
+    )
+    return comp_name, ok
+
+
 def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
     """
     Build all components defined in a project's build.toml.
 
     Reads each .prompt file, runs the full pipeline, outputs
     all artifacts to build/.  Uses caching and parallel builds.
+    Dispatches to wasm or x86-64 pipeline based on project target.
     """
     try:
         project = load_project(project_dir)
@@ -859,12 +897,24 @@ def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
         print(f"\n✗ {e}")
         return False
 
+    is_wasm = project.target == "wasm"
+
+    # Check wasm toolchain upfront
+    if is_wasm:
+        tc = toolchain.detect()
+        missing = tc.check_required()
+        if missing:
+            print("\n  ✗ Missing wasm tools:")
+            for m in missing:
+                print(f"    - {m}")
+            return False
+
     # Apply model config from build.toml [model] section
     from . import llm
     llm.configure(project.model)
 
     build_dir = ensure_build_dir(project)
-    cache = BuildCache(build_dir)
+    cache = BuildCache(build_dir, target=project.target)
     t_start = time.monotonic()
 
     model_info = llm.get_model_info()
@@ -884,16 +934,15 @@ def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
     print(f"{'═' * 60}")
 
     # ── Check cache for each component ──
-    cached = {}   # name → domain (restored from cache)
-    to_build = {} # name → ComponentConfig (needs rebuild)
+    cached = set()    # names restored from cache
+    to_build = {}     # name → ComponentConfig (needs rebuild)
 
     for comp_name, comp in project.components.items():
         if not no_cache:
             h = prompt_hash(comp.prompt_text)
             if cache.is_cached(comp_name, h):
-                domain = detect_domain(comp.prompt_text)
                 if cache.restore(comp_name, build_dir):
-                    cached[comp_name] = domain
+                    cached.add(comp_name)
                     print(f"\n  ⚡ {comp_name}: unchanged, restored from cache")
                     continue
         to_build[comp_name] = comp
@@ -903,9 +952,10 @@ def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
     domains = {}
 
     # Carry over cached results
-    for name, domain in cached.items():
+    for name in cached:
         results[name] = True
-        domains[name] = domain
+        if not is_wasm:
+            domains[name] = detect_domain(project.components[name].prompt_text)
 
     if to_build:
         n_parallel = len(to_build)
@@ -915,13 +965,20 @@ def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
         with ThreadPoolExecutor(max_workers=min(n_parallel, 4)) as pool:
             futures = {}
             for comp_name, comp in to_build.items():
-                f = pool.submit(_build_one_component, comp_name, comp, build_dir)
+                if is_wasm:
+                    f = pool.submit(_build_one_wasm_component, comp_name, comp, build_dir)
+                else:
+                    f = pool.submit(_build_one_component, comp_name, comp, build_dir)
                 futures[f] = comp_name
 
             for f in as_completed(futures):
-                comp_name, ok, domain = f.result()
-                results[comp_name] = ok
-                domains[comp_name] = domain
+                if is_wasm:
+                    comp_name, ok = f.result()
+                    results[comp_name] = ok
+                else:
+                    comp_name, ok, domain = f.result()
+                    results[comp_name] = ok
+                    domains[comp_name] = domain
                 # Cache successful builds
                 if ok:
                     comp = to_build[comp_name]
@@ -941,31 +998,62 @@ def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
         print(f"  ({len(cached)} cached, {len(to_build)} built)", end="")
     print()
 
-    if passed:
-        print(f"  ✓ Passed ({len(passed)}):")
-        for name in passed:
-            tag = " (cached)" if name in cached else ""
-            print(f"      {name}.h  {name}.s  {name}.o{tag}")
-    if failed:
-        print(f"  ✗ Failed ({len(failed)}):")
-        for name in failed:
-            print(f"      {name}")
+    if is_wasm:
+        # Wasm build summary
+        has_native = any((build_dir / f"{n}.cwasm").exists() for n in passed)
+        if passed:
+            print(f"  ✓ Passed ({len(passed)}):")
+            for name in passed:
+                tag = " (cached)" if name in cached else ""
+                cwasm = build_dir / f"{name}.cwasm"
+                native_tag = " + .cwasm" if cwasm.exists() else ""
+                print(f"      {name}.wat  {name}.wasm{native_tag}{tag}")
+        if failed:
+            print(f"  ✗ Failed ({len(failed)}):")
+            for name in failed:
+                print(f"      {name}")
 
-    # ── Generate main.c ──
-    main_path = None
-    if passed:
-        main_path = generate_main_c(build_dir, passed, domains, app_prompt=project.app_prompt)
+        print(f"")
+        print(f"  Output: {_relpath(build_dir)}/")
+        if passed:
+            cmd = Path(sys.argv[0]).stem
+            print(f"  Test:   {cmd} run {_relpath(project.project_dir)}")
+            print(f"  Run:")
+            for name in passed:
+                cwasm = build_dir / f"{name}.cwasm"
+                if cwasm.exists():
+                    print(f"    wasmtime run --allow-precompiled --invoke <func> {_relpath(cwasm)}")
+                else:
+                    print(f"    wasmtime run --invoke <func> {_relpath(build_dir / f'{name}.wasm')}")
+        print(f"{'═' * 60}\n")
+        return len(failed) == 0
+    else:
+        # x86-64 build summary
+        if passed:
+            print(f"  ✓ Passed ({len(passed)}):")
+            for name in passed:
+                tag = " (cached)" if name in cached else ""
+                print(f"      {name}.h  {name}.s  {name}.o{tag}")
+        if failed:
+            print(f"  ✗ Failed ({len(failed)}):")
+            for name in failed:
+                print(f"      {name}")
+
+        # ── Generate main.c ──
+        main_path = None
+        if passed:
+            main_path = generate_main_c(build_dir, passed, domains, app_prompt=project.app_prompt)
+            if main_path:
+                print(f"  main.c: {_relpath(main_path)}")
+
+        print(f"")
+        print(f"  Output: {_relpath(build_dir)}/")
         if main_path:
-            print(f"  main.c: {_relpath(main_path)}")
+            cmd = Path(sys.argv[0]).stem
+            print(f"  Run:    {cmd} run {_relpath(project.project_dir)}")
+        print(f"{'═' * 60}\n")
 
-    print(f"")
-    print(f"  Output: {_relpath(build_dir)}/")
-    if main_path:
-        cmd = Path(sys.argv[0]).stem
-        print(f"  Run:    {cmd} run {_relpath(project.project_dir)}")
-    print(f"{'═' * 60}\n")
-
-    return len(failed) == 0 and main_path is not None
+        return len(failed) == 0 and main_path is not None
 
 
 def _extract_c_code(raw: str) -> str:
@@ -1126,6 +1214,48 @@ def run_project(project_dir: str = ".", no_cache: bool = False) -> bool:
 
     project = load_project(project_dir)
     build_dir = project.build_dir
+
+    if project.target == "wasm":
+        # For wasm projects, run all component tests
+        print(f"\n▸ Running wasm component tests...\n")
+        all_passed = True
+        for name in project.components:
+            # Prefer .cwasm (native AOT) over .wasm
+            cwasm_path = build_dir / f"{name}.cwasm"
+            wasm_path = build_dir / f"{name}.wasm"
+            run_path = str(cwasm_path) if cwasm_path.exists() else str(wasm_path)
+            if not os.path.exists(run_path):
+                print(f"  ✗ {name}: no .wasm or .cwasm found")
+                all_passed = False
+                continue
+
+            tag = "(native)" if cwasm_path.exists() else "(wasm)"
+            print(f"  ── {name} {tag} ──")
+
+            # Re-parse the spec to get test cases
+            comp = project.components[name]
+            try:
+                spec = intent_to_wasm_spec(comp.prompt_text)
+                spec.name = name
+            except RuntimeError:
+                print(f"    ⚠ Could not parse spec for test cases")
+                continue
+
+            if not spec.tests:
+                print(f"    (no test cases)")
+                continue
+
+            test_results = run_wasm_tests(spec, run_path)
+            for tr in test_results:
+                print(f"  {tr}")
+                if not tr.passed:
+                    all_passed = False
+            passed_count = sum(1 for t in test_results if t.passed)
+            failed_count = sum(1 for t in test_results if not t.passed)
+            print(f"    {passed_count} passed, {failed_count} failed\n")
+
+        return all_passed
+
     main_c = build_dir / "main.c"
 
     if not main_c.exists():
@@ -1202,16 +1332,18 @@ def interactive():
         compile_pipeline(intent)  # ignore domain return
 
 
-def check_dependencies():
+def check_dependencies(target: str = "wasm"):
     """Check for required external tools and print helpful messages."""
     from . import llm
 
-    gcc = shutil.which("gcc")
-    if not gcc:
-        print("\n  ✗ GCC not found.")
-        print("    Install: apt install gcc (Linux) / xcode-select --install (macOS)")
-        print("  GCC is required. Cannot continue.")
-        sys.exit(1)
+    if target != "wasm":
+        # x86-64 pipeline requires GCC
+        gcc = shutil.which("gcc")
+        if not gcc:
+            print("\n  ✗ GCC not found.")
+            print("    Install: apt install gcc (Linux) / xcode-select --install (macOS)")
+            print("  GCC is required for x86-64-linux target. Cannot continue.")
+            sys.exit(1)
 
     backend = llm.get_backend()
     has_claude = shutil.which("claude")
@@ -1234,20 +1366,20 @@ def show_help(cmd: str):
     print(f"""
   prompt2bin — from natural language to verified machine code
 
-  Targets: x86-64-linux (default), wasm
+  Targets: wasm (default), x86-64-linux
   Domains (x86-64): arena, ring buffer, process spawner, string table, terminal I/O
 
   Usage:
-    {cmd} init <name> [--template <t>]   Scaffold a new project
+    {cmd} init <name> [--template <t>] [--target <t>]  Scaffold a new project
     {cmd} build [dir] [--no-cache]         Build all components in a project
-    {cmd} run [dir] [--no-cache]           Build + compile + run
-    {cmd} "<prompt>"                      One-shot: compile a single prompt
-    {cmd} --target wasm "<prompt>"        One-shot: compile to WebAssembly
+    {cmd} run [dir] [--no-cache]           Build + run tests (wasm) or executable (x86)
+    {cmd} "<prompt>"                      One-shot: compile to wasm (default)
+    {cmd} --target x86-64-linux "<prompt>"  One-shot: compile to x86-64
     {cmd} --interactive                   Interactive mode
     {cmd} --help                          Show this help
 
   Flags:
-    --target t    Compilation target: wasm or x86-64-linux (default)
+    --target t    Compilation target: wasm (default) or x86-64-linux
     --debug       Show LLM prompts, raw responses, and tool commands
     --no-cache    Skip build cache, rebuild all components
 
@@ -1270,11 +1402,11 @@ def show_help(cmd: str):
     P2B_RUN_TIMEOUT      Seconds to allow built binary to run
 
   Examples:
-    {cmd} init my_game --template game-engine
-    {cmd} build my_game
-    {cmd} "I need a memory pool, 4KB, 16-byte aligned"
-    {cmd} --target wasm "a function that adds two i32 numbers"
-    {cmd} --target wasm "bump allocator, 4KB, 16-byte alignment"
+    {cmd} "a function that adds two i32 numbers"
+    {cmd} "bump allocator, 4KB, 16-byte alignment"
+    {cmd} init my_wasm --target wasm
+    {cmd} build my_wasm
+    {cmd} --target x86-64-linux "I need a memory pool, 4KB, 16-byte aligned"
 """)
 
 
@@ -1291,10 +1423,11 @@ def main():
         interactive()
     elif sys.argv[1] == "init":
         if len(sys.argv) < 3:
-            print(f"Usage: {cmd} init <project_name> [--template <name>]")
+            print(f"Usage: {cmd} init <project_name> [--template <name>] [--target wasm|x86-64-linux]")
             sys.exit(1)
         project_name = sys.argv[2]
         template = None
+        target = None
         if "--template" in sys.argv:
             idx = sys.argv.index("--template")
             if idx + 1 < len(sys.argv):
@@ -1302,17 +1435,26 @@ def main():
             else:
                 print(f"Available templates: {', '.join(TEMPLATES)}")
                 sys.exit(1)
+        if "--target" in sys.argv:
+            idx = sys.argv.index("--target")
+            if idx + 1 < len(sys.argv):
+                target = sys.argv[idx + 1]
+            else:
+                print("  ✗ --target requires a value (wasm or x86-64-linux)")
+                sys.exit(1)
         try:
-            path, used_template = init_project(project_name, template)
+            path, used_template = init_project(project_name, template, target=target)
             tmpl = TEMPLATES[used_template]
             components = list(tmpl["components"].keys())
+            resolved_target = target or tmpl.get("target", "x86-64-linux")
             print(f"\n  ✓ Created project at {_relpath(path)}/")
             print(f"    Template: {used_template} — {tmpl['description']}")
+            print(f"    Target: {resolved_target}")
             print(f"    Components: {', '.join(components)}")
             print(f"")
             print(f"    Next steps:")
             print(f"      1. Review specs/ and edit prompts to your needs")
-            print(f"      2. {cmd} run {project_name}")
+            print(f"      2. {cmd} build {project_name}")
             print()
         except (FileExistsError, ValueError) as e:
             print(f"\n  ✗ {e}")
@@ -1342,9 +1484,8 @@ def main():
         success = run_project(project_dir, no_cache=no_cache)
         sys.exit(0 if success else 1)
     else:
-        check_dependencies()
         debug = "--debug" in sys.argv
-        target = "x86-64-linux"  # default
+        target = "wasm"  # default (use --target x86-64-linux for legacy pipeline)
         remaining = [a for a in sys.argv[1:] if a not in ("--debug",)]
         # Parse --target flag
         if "--target" in remaining:
@@ -1356,6 +1497,7 @@ def main():
                 print("  ✗ --target requires a value (wasm or x86-64-linux)")
                 sys.exit(1)
         intent = " ".join(remaining)
+        check_dependencies(target)
         if debug:
             from . import llm
             llm.set_debug(True)
