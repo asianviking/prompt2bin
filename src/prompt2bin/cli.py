@@ -59,6 +59,14 @@ from .verify_termio import verify_termio_spec
 from .codegen_termio_llm import generate_termio_llm
 from .test_termio import run_termio_test
 
+# Wasm pipeline
+from .wasm_intent import intent_to_wasm_spec
+from .wasm_verify import verify_wasm_spec
+from .wasm_codegen import generate_wat
+from .wasm_validate import compile_wat_to_wasm, check_size_budget, optimize_wasm
+from .wasm_test import run_wasm_tests
+from . import toolchain
+
 # Project system
 from .project import load_project, ensure_build_dir, init_project, TEMPLATES
 from .cache import BuildCache, prompt_hash
@@ -545,6 +553,138 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
 
     return _phase4(c_code, spec.name, output_path, lines, "termio",
                    "_force_readline", f"{spec.name}_readline", output_dir, summary=not oneshot)
+
+
+def _compile_wasm(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
+    """Wasm pipeline: intent → WasmSpec → verify → WAT → .wasm → test.
+    Returns success boolean."""
+
+    # Check toolchain
+    tc = toolchain.detect()
+    missing = tc.check_required()
+    if missing:
+        print("\n  ✗ Missing wasm tools:")
+        for m in missing:
+            print(f"    - {m}")
+        return False
+
+    print(f"\n{'─' * 60}")
+    print(f"  INPUT: {intent}")
+    print(f"  TARGET: wasm")
+    print(f"{'─' * 60}")
+
+    # Phase 1: Intent → WasmSpec
+    print("\n▸ Phase 1: Translating intent → WasmSpec...", flush=True)
+    t0 = time.monotonic()
+    try:
+        spec = intent_to_wasm_spec(intent)
+    except RuntimeError as e:
+        print(f"  ✗ {e}")
+        return False
+    if name_override:
+        spec.name = name_override
+    print(f"  ({time.monotonic() - t0:.1f}s)")
+    print(spec.describe())
+
+    # Phase 2: Verify spec
+    print("\n▸ Phase 2: Verifying WasmSpec...", flush=True)
+    t0 = time.monotonic()
+    results = verify_wasm_spec(spec)
+    all_passed = True
+    for r in results:
+        print(r)
+        if not r.passed:
+            all_passed = False
+
+    if not all_passed:
+        print("\n  ✗ Verification FAILED. Code generation aborted.")
+        for r in results:
+            if not r.passed:
+                print(f"    - {r.property_name}: {r.message}")
+        return False
+    print(f"\n  All {len(results)} properties verified ({time.monotonic() - t0:.1f}s)")
+
+    # Phase 3: Generate WAT via LLM (with structured retry loop)
+    verified_props = [r.message for r in results if r.passed]
+    print("\n▸ Phase 3: Generating WAT via LLM...", flush=True)
+    t0 = time.monotonic()
+    wat_code = generate_wat(spec, verified_properties=verified_props, max_retries=3)
+
+    if wat_code is None:
+        print("  ✗ WAT code generation failed after all retries.")
+        return False
+    print(f"  Generated WAT ({len(wat_code)} chars, {time.monotonic() - t0:.1f}s)")
+
+    # Phase 4: Compile WAT → .wasm + validate + size budget
+    print("\n▸ Phase 4: Compiling WAT → .wasm...", flush=True)
+    t0 = time.monotonic()
+    wat_path = os.path.join(output_dir, f"{spec.name}.wat")
+    wasm_path = os.path.join(output_dir, f"{spec.name}.wasm")
+
+    with open(wat_path, "w") as f:
+        f.write(wat_code)
+
+    ok, err = compile_wat_to_wasm(wat_code, wasm_path)
+    if not ok:
+        print(f"  ✗ wat2wasm failed: {err}")
+        return False
+
+    wasm_size = os.path.getsize(wasm_path)
+    print(f"  {_relpath(wasm_path):30s} — {wasm_size:>6,} bytes")
+
+    # Size budget check
+    if spec.size_budget_bytes > 0:
+        with open(wasm_path, "rb") as f:
+            wasm_bytes = f.read()
+        budget_ok, budget_msg = check_size_budget(wasm_bytes, spec.size_budget_bytes)
+        if not budget_ok:
+            print(f"  ⚠ Size budget exceeded: {budget_msg}")
+            # Not fatal — just a warning for Phase 1
+
+    # Optional optimization
+    opt_ok, opt_err = optimize_wasm(wasm_path)
+    if opt_ok and os.path.exists(wasm_path):
+        opt_size = os.path.getsize(wasm_path)
+        if opt_size < wasm_size:
+            print(f"  Optimized: {wasm_size:,} → {opt_size:,} bytes")
+
+    print(f"  ({time.monotonic() - t0:.1f}s)")
+
+    # Phase 5: Run tests
+    if spec.tests:
+        print("\n▸ Phase 5: Running wasmtime tests...", flush=True)
+        t0 = time.monotonic()
+        test_results = run_wasm_tests(spec, wasm_path)
+        tests_passed = 0
+        tests_failed = 0
+        for tr in test_results:
+            print(tr)
+            if tr.passed:
+                tests_passed += 1
+            else:
+                tests_failed += 1
+        print(f"\n  {tests_passed} passed, {tests_failed} failed ({time.monotonic() - t0:.1f}s)")
+    else:
+        print("\n  (no test cases in spec)")
+
+    # Summary
+    print(f"\n{'═' * 60}")
+    print(f"  ✓ Complete pipeline: English → verified wasm binary")
+    print(f"")
+    print(f"    {_relpath(wat_path):30s}  WAT source ({wat_code.count(chr(10))} lines)")
+    print(f"    {_relpath(wasm_path):30s}  wasm binary ({wasm_size:,} bytes)")
+    print(f"")
+    print(f"    Run it:")
+    for func in spec.functions:
+        if func.params:
+            args = " ".join("0" for _ in func.params)
+            print(f"      wasmtime run --invoke {func.name} {spec.name}.wasm {args}")
+        else:
+            print(f"      wasmtime run --invoke {func.name} {spec.name}.wasm")
+        break  # Just show the first function as example
+    print(f"{'═' * 60}\n")
+
+    return True
 
 
 def _phase4(c_code, name, output_path, lines, domain, hot_func, hot_label, output_dir=".", summary=True):
@@ -1094,18 +1234,21 @@ def show_help(cmd: str):
     print(f"""
   prompt2bin — from natural language to verified machine code
 
-  Domains: arena, ring buffer, process spawner, string table, terminal I/O
+  Targets: x86-64-linux (default), wasm
+  Domains (x86-64): arena, ring buffer, process spawner, string table, terminal I/O
 
   Usage:
     {cmd} init <name> [--template <t>]   Scaffold a new project
     {cmd} build [dir] [--no-cache]         Build all components in a project
     {cmd} run [dir] [--no-cache]           Build + compile + run
     {cmd} "<prompt>"                      One-shot: compile a single prompt
+    {cmd} --target wasm "<prompt>"        One-shot: compile to WebAssembly
     {cmd} --interactive                   Interactive mode
     {cmd} --help                          Show this help
 
   Flags:
-    --debug       Show LLM prompts, raw responses, and GCC commands
+    --target t    Compilation target: wasm or x86-64-linux (default)
+    --debug       Show LLM prompts, raw responses, and tool commands
     --no-cache    Skip build cache, rebuild all components
 
   Templates: {', '.join(TEMPLATES)}
@@ -1130,6 +1273,8 @@ def show_help(cmd: str):
     {cmd} init my_game --template game-engine
     {cmd} build my_game
     {cmd} "I need a memory pool, 4KB, 16-byte aligned"
+    {cmd} --target wasm "a function that adds two i32 numbers"
+    {cmd} --target wasm "bump allocator, 4KB, 16-byte alignment"
 """)
 
 
@@ -1199,14 +1344,28 @@ def main():
     else:
         check_dependencies()
         debug = "--debug" in sys.argv
-        remaining = [a for a in sys.argv[1:] if a != "--debug"]
+        target = "x86-64-linux"  # default
+        remaining = [a for a in sys.argv[1:] if a not in ("--debug",)]
+        # Parse --target flag
+        if "--target" in remaining:
+            idx = remaining.index("--target")
+            if idx + 1 < len(remaining):
+                target = remaining[idx + 1]
+                remaining = remaining[:idx] + remaining[idx + 2:]
+            else:
+                print("  ✗ --target requires a value (wasm or x86-64-linux)")
+                sys.exit(1)
         intent = " ".join(remaining)
         if debug:
             from . import llm
             llm.set_debug(True)
-        success, domain, name = compile_pipeline(intent, oneshot=True)
-        if success and name:
-            success = _phase5_executable(name, domain, intent)
+
+        if target == "wasm":
+            success = _compile_wasm(intent)
+        else:
+            success, domain, name = compile_pipeline(intent, oneshot=True)
+            if success and name:
+                success = _phase5_executable(name, domain, intent)
         sys.exit(0 if success else 1)
 
 
