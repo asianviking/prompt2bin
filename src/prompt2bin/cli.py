@@ -65,6 +65,7 @@ from .wasm_verify import verify_wasm_spec
 from .wasm_codegen import generate_wat
 from .wasm_validate import compile_wat_to_wasm, check_size_budget, optimize_wasm, compile_wasm_native
 from .wasm_test import run_wasm_tests
+from .wasm_exec import exec_once, exec_turn, exec_invoke, save_session_record, ExecSession
 from . import toolchain
 
 # Project system
@@ -1332,6 +1333,174 @@ def interactive():
         compile_pipeline(intent)  # ignore domain return
 
 
+def _exec_oneshot(intent: str, save_session: str | None = None) -> bool:
+    """Run p2b exec in one-shot mode."""
+    tc = toolchain.detect()
+    missing = tc.check_required()
+    if missing:
+        print("\n  ✗ Missing wasm tools:")
+        for m in missing:
+            print(f"    - {m}")
+        return False
+
+    print(f"\n  ▸ Generating wasm for: {intent}", flush=True)
+    t0 = time.monotonic()
+    result = exec_once(intent)
+    elapsed = time.monotonic() - t0
+
+    if result.error:
+        print(f"  ✗ {result.error}")
+        return False
+
+    # Print spec summary
+    if result.spec:
+        funcs = ", ".join(f.name for f in result.spec.functions)
+        print(f"  ✓ Spec: {result.spec.name} — {funcs}")
+
+    # Print compilation info
+    if result.wasm_path:
+        wasm_size = os.path.getsize(result.wasm_path)
+        print(f"  ✓ Compiled {result.spec.name}.wasm ({wasm_size} bytes)")
+
+    # Print test results
+    for t in result.test_results:
+        print(t)
+
+    passed = sum(1 for t in result.test_results if t.passed)
+    total = len(result.test_results)
+    status = "✓" if result.success else "✗"
+    print(f"\n  {status} {passed}/{total} tests passed ({elapsed:.1f}s)")
+
+    # Print WAT
+    if result.wat_code:
+        print(f"\n  WAT source:")
+        for line in result.wat_code.splitlines():
+            print(f"    {line}")
+
+    # Save training data
+    if save_session and result.spec:
+        save_session_record(save_session, intent, result, turn=0, prior_wat=None)
+        print(f"\n  ✓ Saved record to {save_session}")
+
+    return result.success
+
+
+def _exec_repl(save_session: str | None = None) -> None:
+    """Run p2b exec in interactive REPL mode."""
+    tc = toolchain.detect()
+    missing = tc.check_required()
+    if missing:
+        print("\n  ✗ Missing wasm tools:")
+        for m in missing:
+            print(f"    - {m}")
+        return
+
+    session = ExecSession()
+    print("\n  p2b exec — interactive wasm exploration")
+    print("  Type a prompt to generate wasm. Commands: .wat .spec .save <name> .reset .quit")
+    print()
+
+    turn = 0
+    try:
+        while True:
+            try:
+                user_input = input("p2b> ").strip()
+            except EOFError:
+                break
+
+            if not user_input:
+                continue
+
+            # Dot-commands
+            if user_input in (".quit", ".exit"):
+                break
+            if user_input == ".wat":
+                if session.current_wat:
+                    print(session.current_wat)
+                else:
+                    print("  (no module loaded)")
+                continue
+            if user_input == ".spec":
+                if session.current_spec:
+                    print(session.current_spec.describe())
+                else:
+                    print("  (no spec loaded)")
+                continue
+            if user_input == ".reset":
+                session.cleanup()
+                session = ExecSession()
+                turn = 0
+                print("  ✓ Session reset")
+                continue
+            if user_input.startswith(".save "):
+                name = user_input[6:].strip()
+                if not name:
+                    print("  Usage: .save <name>")
+                    continue
+                if not session.current_wat or not session.wasm_path:
+                    print("  (no module to save)")
+                    continue
+                wat_out = f"{name}.wat"
+                wasm_out = f"{name}.wasm"
+                with open(wat_out, "w") as f:
+                    f.write(session.current_wat)
+                shutil.copy2(session.wasm_path, wasm_out)
+                print(f"  ✓ Saved {wat_out} + {wasm_out}")
+                continue
+
+            # invoke command
+            if user_input.startswith("invoke "):
+                parts = user_input.split()
+                if len(parts) < 2:
+                    print("  Usage: invoke <func> [args...]")
+                    continue
+                func = parts[1]
+                args = parts[2:]
+                output = exec_invoke(session, func, args)
+                print(f"  → {output}")
+                continue
+
+            # Regular prompt — run exec turn
+            prior_wat = session.current_wat
+            t0 = time.monotonic()
+            result = exec_turn(session, user_input)
+            elapsed = time.monotonic() - t0
+
+            if result.error:
+                print(f"  ✗ {result.error}")
+                continue
+
+            # Print results
+            if result.spec and result.wat_code:
+                wat_size = len(result.wat_code.encode())
+                print(f"  ✓ Generated {result.spec.name}.wat ({wat_size} bytes)")
+            if result.wasm_path and os.path.exists(result.wasm_path):
+                wasm_size = os.path.getsize(result.wasm_path)
+                print(f"  ✓ Compiled {result.spec.name}.wasm ({wasm_size} bytes)")
+
+            for t in result.test_results:
+                print(t)
+
+            passed = sum(1 for t in result.test_results if t.passed)
+            total = len(result.test_results)
+            if total:
+                status = "✓" if result.success else "✗"
+                print(f"  {status} {passed}/{total} tests ({elapsed:.1f}s)")
+
+            # Save training data
+            if save_session and result.spec:
+                save_session_record(save_session, user_input, result, turn=turn, prior_wat=prior_wat)
+
+            turn += 1
+            print()
+
+    except KeyboardInterrupt:
+        print("\n")
+    finally:
+        session.cleanup()
+        print("  Session ended.")
+
+
 def check_dependencies(target: str = "wasm"):
     """Check for required external tools and print helpful messages."""
     from . import llm
@@ -1373,6 +1542,8 @@ def show_help(cmd: str):
     {cmd} init <name> [--template <t>] [--target <t>]  Scaffold a new project
     {cmd} build [dir] [--no-cache]         Build all components in a project
     {cmd} run [dir] [--no-cache]           Build + run tests (wasm) or executable (x86)
+    {cmd} exec "<prompt>"                  Fast exec: generate → compile → run
+    {cmd} exec --repl                     Interactive REPL (iterative wasm dev)
     {cmd} "<prompt>"                      One-shot: compile to wasm (default)
     {cmd} --target x86-64-linux "<prompt>"  One-shot: compile to x86-64
     {cmd} --interactive                   Interactive mode
@@ -1402,6 +1573,9 @@ def show_help(cmd: str):
     P2B_RUN_TIMEOUT      Seconds to allow built binary to run
 
   Examples:
+    {cmd} exec "a function that adds two i32 numbers"
+    {cmd} exec --repl
+    {cmd} exec --repl --save-session
     {cmd} "a function that adds two i32 numbers"
     {cmd} "bump allocator, 4KB, 16-byte alignment"
     {cmd} init my_wasm --target wasm
@@ -1459,6 +1633,27 @@ def main():
         except (FileExistsError, ValueError) as e:
             print(f"\n  ✗ {e}")
             sys.exit(1)
+    elif sys.argv[1] == "exec":
+        debug = "--debug" in sys.argv
+        repl = "--repl" in sys.argv
+        save_session = None
+        if "--save-session" in sys.argv:
+            save_session = "p2b-session.jsonl"
+        if debug:
+            from . import llm
+            llm.set_debug(True)
+        check_dependencies("wasm")
+        if repl:
+            _exec_repl(save_session=save_session)
+        else:
+            flags = ("--debug", "--repl", "--save-session")
+            args = [a for a in sys.argv[2:] if a not in flags]
+            intent = " ".join(args)
+            if not intent:
+                print(f"  Usage: {cmd} exec \"<prompt>\"  or  {cmd} exec --repl")
+                sys.exit(1)
+            success = _exec_oneshot(intent, save_session=save_session)
+            sys.exit(0 if success else 1)
     elif sys.argv[1] == "build":
         check_dependencies()
         debug = "--debug" in sys.argv
