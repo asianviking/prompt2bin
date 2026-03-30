@@ -71,6 +71,7 @@ from . import toolchain
 # Project system
 from .project import load_project, ensure_build_dir, init_project, TEMPLATES
 from .cache import BuildCache, prompt_hash
+from .nlah import NlahPrompt, FailureAction, parse_prompt
 
 
 BANNER = """
@@ -556,9 +557,18 @@ def _compile_termio(intent: str, output_dir: str = ".", name_override: str | Non
                    "_force_readline", f"{spec.name}_readline", output_dir, summary=not oneshot)
 
 
-def _compile_wasm(intent: str, output_dir: str = ".", name_override: str | None = None) -> bool:
+def _compile_wasm(
+    intent: str,
+    output_dir: str = ".",
+    name_override: str | None = None,
+    nlah: NlahPrompt | None = None,
+) -> bool:
     """Wasm pipeline: intent → WasmSpec → verify → WAT → .wasm → test.
     Returns success boolean."""
+
+    if nlah is None:
+        nlah = NlahPrompt(body=intent)
+    skip_stages = {s.strip().lower() for s in nlah.stages.skip}
 
     # Check toolchain
     tc = toolchain.detect()
@@ -578,7 +588,7 @@ def _compile_wasm(intent: str, output_dir: str = ".", name_override: str | None 
     print("\n▸ Phase 1: Translating intent → WasmSpec...", flush=True)
     t0 = time.monotonic()
     try:
-        spec = intent_to_wasm_spec(intent)
+        spec = intent_to_wasm_spec(intent, nlah=nlah)
     except RuntimeError as e:
         print(f"  ✗ {e}")
         return False
@@ -588,28 +598,39 @@ def _compile_wasm(intent: str, output_dir: str = ".", name_override: str | None 
     print(spec.describe())
 
     # Phase 2: Verify spec
-    print("\n▸ Phase 2: Verifying WasmSpec...", flush=True)
-    t0 = time.monotonic()
-    results = verify_wasm_spec(spec)
-    all_passed = True
-    for r in results:
-        print(r)
-        if not r.passed:
-            all_passed = False
-
-    if not all_passed:
-        print("\n  ✗ Verification FAILED. Code generation aborted.")
+    verified_props: list[str] = []
+    if "verify" in skip_stages:
+        print("\n▸ Phase 2: Verifying WasmSpec... (skipped by stages.skip)", flush=True)
+    else:
+        print("\n▸ Phase 2: Verifying WasmSpec...", flush=True)
+        t0 = time.monotonic()
+        results = verify_wasm_spec(spec)
+        all_passed = True
         for r in results:
+            print(r)
             if not r.passed:
-                print(f"    - {r.property_name}: {r.message}")
-        return False
-    print(f"\n  All {len(results)} properties verified ({time.monotonic() - t0:.1f}s)")
+                all_passed = False
+
+        if not all_passed:
+            print("\n  ✗ Verification FAILED. Code generation aborted.")
+            for r in results:
+                if not r.passed:
+                    print(f"    - {r.property_name}: {r.message}")
+            return False
+        print(f"\n  All {len(results)} properties verified ({time.monotonic() - t0:.1f}s)")
+        verified_props = [r.message for r in results if r.passed]
 
     # Phase 3: Generate WAT via LLM (with structured retry loop)
-    verified_props = [r.message for r in results if r.passed]
     print("\n▸ Phase 3: Generating WAT via LLM...", flush=True)
     t0 = time.monotonic()
-    wat_code = generate_wat(spec, verified_properties=verified_props, max_retries=3)
+    match nlah.failure.wat_generation_failure:
+        case FailureAction.ABORT:
+            max_retries = 1
+        case FailureAction.SKIP:
+            max_retries = 0
+        case _:
+            max_retries = 3
+    wat_code = generate_wat(spec, verified_properties=verified_props, max_retries=max_retries)
 
     if wat_code is None:
         print("  ✗ WAT code generation failed after all retries.")
@@ -643,11 +664,14 @@ def _compile_wasm(intent: str, output_dir: str = ".", name_override: str | None 
             # Not fatal — just a warning for Phase 1
 
     # Optional optimization
-    opt_ok, opt_err = optimize_wasm(wasm_path)
-    if opt_ok and os.path.exists(wasm_path):
-        opt_size = os.path.getsize(wasm_path)
-        if opt_size < wasm_size:
-            print(f"  Optimized: {wasm_size:,} → {opt_size:,} bytes")
+    if nlah.adapters.wasm_opt:
+        opt_ok, opt_err = optimize_wasm(wasm_path)
+        if opt_ok and os.path.exists(wasm_path):
+            opt_size = os.path.getsize(wasm_path)
+            if opt_size < wasm_size:
+                print(f"  Optimized: {wasm_size:,} → {opt_size:,} bytes")
+    else:
+        print(f"  (wasm-opt disabled by adapters.wasm_opt=false)")
 
     print(f"  ({time.monotonic() - t0:.1f}s)")
 
@@ -665,7 +689,9 @@ def _compile_wasm(intent: str, output_dir: str = ".", name_override: str | None 
     print(f"  ({time.monotonic() - t0:.1f}s)")
 
     # Phase 5: Run tests
-    if spec.tests:
+    if "test" in skip_stages:
+        print("\n▸ Phase 5: Running wasmtime tests... (skipped by stages.skip)", flush=True)
+    elif spec.tests:
         print("\n▸ Phase 5: Running wasmtime tests...", flush=True)
         t0 = time.monotonic()
         test_results = run_wasm_tests(spec, wasm_path)
@@ -683,10 +709,17 @@ def _compile_wasm(intent: str, output_dir: str = ".", name_override: str | None 
 
     # Summary
     print(f"\n{'═' * 60}")
+    verified = "verify" not in skip_stages
     if aot_ok:
-        print(f"  ✓ Complete pipeline: English → verified native binary (via wasm)")
+        if verified:
+            print(f"  ✓ Complete pipeline: English → verified native binary (via wasm)")
+        else:
+            print(f"  ✓ Complete pipeline: English → native binary (via wasm, verification skipped)")
     else:
-        print(f"  ✓ Complete pipeline: English → verified wasm binary")
+        if verified:
+            print(f"  ✓ Complete pipeline: English → verified wasm binary")
+        else:
+            print(f"  ✓ Complete pipeline: English → wasm binary (verification skipped)")
     print(f"")
     print(f"    {_relpath(wat_path):30s}  WAT source ({wat_code.count(chr(10))} lines)")
     print(f"    {_relpath(wasm_path):30s}  wasm binary ({wasm_size:,} bytes)")
@@ -880,6 +913,7 @@ def _build_one_wasm_component(comp_name, comp, build_dir):
         comp.prompt_text,
         output_dir=str(build_dir),
         name_override=comp_name,
+        nlah=comp.nlah,
     )
     return comp_name, ok
 
@@ -940,7 +974,7 @@ def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
 
     for comp_name, comp in project.components.items():
         if not no_cache:
-            h = prompt_hash(comp.prompt_text)
+            h = prompt_hash(comp.raw_text or comp.prompt_text)
             if cache.is_cached(comp_name, h):
                 if cache.restore(comp_name, build_dir):
                     cached.add(comp_name)
@@ -983,7 +1017,7 @@ def build_project(project_dir: str = ".", no_cache: bool = False) -> bool:
                 # Cache successful builds
                 if ok:
                     comp = to_build[comp_name]
-                    h = prompt_hash(comp.prompt_text)
+                    h = prompt_hash(comp.raw_text or comp.prompt_text)
                     cache.store(comp_name, h, build_dir)
 
     elapsed = time.monotonic() - t_start
@@ -1236,7 +1270,7 @@ def run_project(project_dir: str = ".", no_cache: bool = False) -> bool:
             # Re-parse the spec to get test cases
             comp = project.components[name]
             try:
-                spec = intent_to_wasm_spec(comp.prompt_text)
+                spec = intent_to_wasm_spec(comp.prompt_text, nlah=comp.nlah)
                 spec.name = name
             except RuntimeError:
                 print(f"    ⚠ Could not parse spec for test cases")
@@ -1697,8 +1731,20 @@ def main():
             from . import llm
             llm.set_debug(True)
 
+        nlah: NlahPrompt | None = None
+        p = Path(intent)
+        if intent.endswith(".prompt") and p.exists() and p.is_file():
+            try:
+                nlah = parse_prompt(p.read_text(), source_path=p)
+            except (ValueError, TypeError) as e:
+                print(f"\n✗ {e}")
+                sys.exit(1)
+            intent = nlah.body
+
         if target == "wasm":
-            success = _compile_wasm(intent)
+            if nlah is None:
+                nlah = NlahPrompt(body=intent)
+            success = _compile_wasm(intent, nlah=nlah)
         else:
             success, domain, name = compile_pipeline(intent, oneshot=True)
             if success and name:

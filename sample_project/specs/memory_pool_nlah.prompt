@@ -1,0 +1,32 @@
++++
+target = "wasm"
+size_budget = 4096
+cache = "content-hash"
+
+[contracts]
+preconditions = ["size > 0"]
+postconditions = ["returned pointer is 16-byte aligned (or 0 on failure)"]
+validation_gates = ["wat2wasm", "wasmtime_test"]
+
+[stages]
+skip = []
+
+[failure]
+wat_generation_failure = "retry"
+test_failure = "retry"
+budget_exceeded = "optimize_then_retry"
+
+[adapters]
+wasm_opt = true
++++
+
+I need a simple memory pool / bump allocator for WebAssembly.
+
+- Total capacity: 4KB
+- Alignment: 16 bytes
+- Single-threaded, no locking
+- Functions:
+  - alloc(size: i32) -> i32  (returns 0-based offset pointer into linear memory, or 0 on failure)
+  - reset() -> void
+  - used() -> i32
+  - remaining() -> i32

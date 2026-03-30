@@ -5,9 +5,15 @@ One LLM call with JSON schema produces the complete WasmSpec including
 functions, memory layout, globals, invariants, and test cases.
 """
 
+from __future__ import annotations
+
 import json
+from typing import TYPE_CHECKING
 
 from .wasm_spec import WasmSpec, WASM_SPEC_JSON_SCHEMA, spec_from_dict
+
+if TYPE_CHECKING:
+    from .nlah import NlahPrompt
 
 SYSTEM_PROMPT = """\
 You translate natural language descriptions into formal WebAssembly module specifications as JSON.
@@ -62,7 +68,7 @@ For a bump allocator with 4KB capacity:
 JSON_SCHEMA = json.dumps(WASM_SPEC_JSON_SCHEMA)
 
 
-def intent_to_wasm_spec(intent: str) -> WasmSpec:
+def intent_to_wasm_spec(intent: str, nlah: "NlahPrompt | None" = None) -> WasmSpec:
     """
     Translate natural language intent into a WasmSpec.
 
@@ -71,10 +77,32 @@ def intent_to_wasm_spec(intent: str) -> WasmSpec:
     """
     from . import llm
 
-    params = llm.structured(intent, SYSTEM_PROMPT, JSON_SCHEMA, timeout=120)
+    enriched_intent = intent
+    if nlah and (nlah.contracts.preconditions or nlah.contracts.postconditions):
+        lines: list[str] = [intent, "", "NLAH CONTRACTS:"]
+        if nlah.contracts.preconditions:
+            lines.append("Preconditions:")
+            lines.extend(f"- {p}" for p in nlah.contracts.preconditions)
+        if nlah.contracts.postconditions:
+            lines.append("Postconditions:")
+            lines.extend(f"- {p}" for p in nlah.contracts.postconditions)
+        enriched_intent = "\n".join(lines).strip()
+
+    if llm.is_debug() and enriched_intent != intent:
+        print(
+            f"[DEBUG] intent_to_wasm_spec enriched intent ({len(enriched_intent)} chars):\n{enriched_intent}",
+            flush=True,
+        )
+
+    params = llm.structured(enriched_intent, SYSTEM_PROMPT, JSON_SCHEMA, timeout=120)
     if params and isinstance(params, dict):
         try:
             spec = spec_from_dict(params)
+            if nlah:
+                if nlah.size_budget is not None:
+                    spec.size_budget_bytes = nlah.size_budget
+                if nlah.wasi is not None:
+                    spec.wasi_imports = list(nlah.wasi)
             print(f"  (translated by {llm.get_backend()})")
             return spec
         except (KeyError, TypeError, ValueError) as e:
@@ -82,13 +110,18 @@ def intent_to_wasm_spec(intent: str) -> WasmSpec:
             print("  Retrying...")
             # One retry with explicit error feedback
             retry_prompt = (
-                f"{intent}\n\n"
+                f"{enriched_intent}\n\n"
                 f"Previous attempt had a parse error: {e}\n"
                 f"Please fix and try again."
             )
             params = llm.structured(retry_prompt, SYSTEM_PROMPT, JSON_SCHEMA, timeout=120)
             if params and isinstance(params, dict):
                 spec = spec_from_dict(params)
+                if nlah:
+                    if nlah.size_budget is not None:
+                        spec.size_budget_bytes = nlah.size_budget
+                    if nlah.wasi is not None:
+                        spec.wasi_imports = list(nlah.wasi)
                 print(f"  (translated by {llm.get_backend()} on retry)")
                 return spec
 

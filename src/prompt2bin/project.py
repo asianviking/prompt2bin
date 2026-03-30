@@ -17,6 +17,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .nlah import NlahPrompt, parse_prompt
+
 
 @dataclass
 class ModelConfig:
@@ -33,6 +35,8 @@ class ComponentConfig:
     name: str
     prompt_path: Path
     prompt_text: str = ""
+    raw_text: str = ""
+    nlah: NlahPrompt | None = None
     depends_on: list[str] = field(default_factory=list)
 
 
@@ -99,7 +103,13 @@ def load_project(project_dir: str | Path = ".") -> ProjectConfig:
                 f"  (referenced by component '{comp_name}' in build.toml)"
             )
 
-        prompt_text = prompt_path.read_text().strip()
+        raw_text = prompt_path.read_text()
+        try:
+            nlah = parse_prompt(raw_text, source_path=prompt_path)
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Failed to parse prompt file: {prompt_path}\n  {e}") from e
+
+        prompt_text = nlah.body
         if not prompt_text:
             raise ValueError(f"Prompt file is empty: {prompt_path}")
 
@@ -109,6 +119,8 @@ def load_project(project_dir: str | Path = ".") -> ProjectConfig:
             name=comp_name,
             prompt_path=prompt_path,
             prompt_text=prompt_text,
+            raw_text=raw_text,
+            nlah=nlah,
             depends_on=depends_on,
         )
 
@@ -121,9 +133,12 @@ def load_project(project_dir: str | Path = ".") -> ProjectConfig:
     if not app_prompt_path.exists():
         app_prompt_path = project_dir / "specs" / "app.prompt"
     if app_prompt_path.exists():
-        app_prompt = app_prompt_path.read_text().strip()
-        if not app_prompt:
-            app_prompt = None
+        raw_app = app_prompt_path.read_text()
+        try:
+            app_nlah = parse_prompt(raw_app, source_path=app_prompt_path)
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Failed to parse app.prompt: {app_prompt_path}\n  {e}") from e
+        app_prompt = app_nlah.body or None
 
     return ProjectConfig(
         name=name,
